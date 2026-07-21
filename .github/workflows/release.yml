@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v1.2.3)'
+        required: true
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Create and push tag
+        run: |
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4.1.0
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish build
+        run: dotnet publish TXT2IMG.csproj -c Release -r win-x64 --self-contained true -p:WindowsAppSDKSelfContained=false -p:WindowsPackageType=None -o publish
+
+      - name: Remove debug artifacts from publish output
+        shell: pwsh
+        run: Get-ChildItem publish -Recurse -Include *.pdb, *.Debug.dll | Remove-Item -Force
+
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          $zipName = "TXT2IMG-${{ inputs.version }}-windows-x64.zip"
+          Compress-Archive -Path publish\*, README.md -DestinationPath $zipName -Force
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: "TXT2IMG ${{ inputs.version }}"
+          body: |
+            ## TXT2IMG ${{ inputs.version }}
+
+            ### Installation
+            1. Install the [Windows App SDK Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) (one-time, ~7 MB) if you don't already have it.
+            2. Download `TXT2IMG-${{ inputs.version }}-windows-x64.zip`
+            3. Extract and run `TXT2IMG.exe`.
+
+            ### Requirements
+            - Windows 10/11 x64 with a DirectX 12 compatible GPU (DirectML)
+            - Windows App SDK Runtime 1.7+ (see above)
+
+            The Stable Diffusion models themselves are not bundled — they download automatically
+            (multi-GB, one-time) the first time you generate an image.
+          files: ${{ env.ZIP_NAME }}
+

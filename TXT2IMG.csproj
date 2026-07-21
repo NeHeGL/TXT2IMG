@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>f1fa6523-9c26-4dc5-a6bf-4bcf9fbb5bcd</ApplicationId>
+    <OutputType>WinExe</OutputType>
+    <WindowsPackageType>None</WindowsPackageType>
+    <SelfContained>false</SelfContained>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\AppIcon.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.23.0" />
+    <PackageReference Include="OnnxStack.StableDiffusion" Version="0.60.0" />
+  </ItemGroup>
+
+  <!-- dotnet publish does not carry the compiled XAML (*.xbf) build artifacts into its output for
+       unpackaged WinUI3 apps (no resources.pri is generated for this project, so the app loads XAML
+       pages from these loose files at runtime) - without this, MainWindow fails to load at startup
+       with an unhelpful "XamlParseException: XAML parsing failed." and no further detail. -->
+  <Target Name="IncludeXbfInPublish" BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <_CompiledXbf Include="$(MSBuildProjectDirectory)\bin\$(Configuration)\**\*.xbf" />
+      <ResolvedFileToPublish Include="@(_CompiledXbf)">
+        <RelativePath>%(Filename)%(Extension)</RelativePath>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Message Importance="high" Text="IncludeXbfInPublish: found @(_CompiledXbf-&gt;Count()) xbf file(s)" />
+  </Target>
+</Project>
