@@ -1,0 +1,10 @@
+bin/
+obj/
+publish/
+*.user
+.vs/
+*.msix
+*.pfx
+backups/
+
+tools/shots/
