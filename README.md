@@ -71,7 +71,7 @@ Runs Stable Diffusion XL locally via [OnnxStack](https://github.com/saluteai/Onn
 
 ---
 
-## What's new since v1.0.0
+## What's new in v1.1.0
 
 - **Big style expansion** — the lineup grew to 22 presets, adding **Colorful Vector**, **Cyberpunk**, **Futuristic**, **Graphic Oil**, **Soft Oil**, **Concept Art**, **Minimalist**, and **New Impasto**, alongside heavily retuned recipes for Anime, Oil Painting, Pixel Art, Watercolor, Comic Book, and Fantasy Art. Several recipes were adapted from published prompt guides (see [Credits](#credits)). See [Styles](#styles) for the full breakdown.
 - **Styles alphabetized** in the dropdown, with the selected item no longer given a competing highlight fill (the mouse hover shows what a click will pick).
@@ -118,11 +118,15 @@ It targets `net8.0-windows10.0.19041.0` with WinUI 3.
 
 ## Project layout
 
-- [App.xaml](App.xaml) / [App.xaml.cs](App.xaml.cs) — application entry point
+- [Program.cs](Program.cs) / [App.xaml](App.xaml) / [App.xaml.cs](App.xaml.cs) — application entry point and Windows App SDK bootstrap
 - [MainWindow.xaml](MainWindow.xaml) / [MainWindow.xaml.cs](MainWindow.xaml.cs) — main UI and generation flow
+- [StylePromptBuilder.cs](StylePromptBuilder.cs) — style presets, positive/negative prompts, and per-style tuning
 - [LocalImageGenerator.cs](LocalImageGenerator.cs) — OnnxStack pipeline wrapper
 - [ModelDownloader.cs](ModelDownloader.cs) — model catalog and on-demand download
 - [ExecutionProviders.cs](ExecutionProviders.cs) — DirectML/CPU execution provider setup
+- [PngGrayscale.cs](PngGrayscale.cs) / [PngTextChunk.cs](PngTextChunk.cs) — B&W pixel enforcement and PNG metadata helpers
+- [CrashLog.cs](CrashLog.cs) — fatal-error logging
+- [build.bat](build.bat) — Release publish to `publish\TXT2IMG.exe`
 
 ---
 

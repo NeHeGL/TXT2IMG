@@ -6,5 +6,4 @@ publish/
 *.msix
 *.pfx
 backups/
-
-tools/shots/
+tools/
