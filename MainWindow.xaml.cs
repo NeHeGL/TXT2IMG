@@ -29,10 +29,57 @@ public sealed partial class MainWindow : Window
         new ResultItem(), new ResultItem(), new ResultItem(), new ResultItem(), new ResultItem()
     });
 
+    // Alphabetized style list (ComboBox ItemsSource).
+    private static readonly string[] StyleNames =
+    [
+        "None",
+        "3D Render",
+        "Anime",
+        "Black & White",
+        "Cartoon",
+        "Claymation",
+        "Comic Book",
+        "Colorful Vector",
+        "Concept Art",
+        "Cubist",
+        "Cyberpunk",
+        "Dark Fantasy",
+        "Fantasy Art",
+        "Film Noir",
+        "Futuristic",
+        "Graphic Oil",
+        "Icon",
+        "Impressionist",
+        "Ink Wash",
+        "Kirigami",
+        "Line Art",
+        "Low Poly",
+        "Minecraft",
+        "Minimalist",
+        "Oil Painting",
+        "Origami",
+        "Paper Cut Collage",
+        "Paper Quilling",
+        "Papercut Shadow Box",
+        "Pixel Art",
+        "Pointillism",
+        "Pop Art",
+        "Silhouette",
+        "Soft Oil",
+        "Stacked Papercut",
+        "Steampunk",
+        "Tribal",
+        "Vintage Photo",
+        "Watercolor",
+        "Zentangle",
+    ];
+
     public MainWindow()
     {
         this.InitializeComponent();
         ResultsPanel.ItemsSource = Results;
+        StyleComboBox.ItemsSource = StyleNames;
+        StyleComboBox.SelectedItem = "None";
         // Height is tuned so the preview box — locked to the selected aspect ratio and therefore
         // limited by the card's width, not its height — leaves no vertical slack. Any surplus
         // becomes empty gaps above and below it, since the box is centered in its row.
@@ -41,6 +88,96 @@ public sealed partial class MainWindow : Window
 
         UpdateStyleDescription();
     }
+
+    private string SelectedStyle => StyleComboBox.SelectedItem?.ToString() ?? "None";
+
+    // Known WinUI3 bug (unpackaged desktop apps in particular): the window is misreported as
+    // "inactive," which breaks the automatic mouse-wheel-to-ScrollViewer routing a ComboBox
+    // dropdown normally relies on — the scrollbar shows and can be dragged, but the wheel does
+    // nothing (see microsoft-ui-xaml#8764/#8161/#10480). Find the popup ScrollViewer on open and
+    // apply wheel via ChangeView. AlignPopupTopToElement pins the popup to the Style box after
+    // scrolling the list to the top (same as origin/master).
+    private ScrollViewer? _dropdownScrollViewer;
+    private UIElement? _dropdownWheelSource;
+    private ComboBox? _dropdownOwner;
+
+    private void ScrollableComboBox_DropDownOpened(object sender, object e)
+    {
+        _dropdownOwner = sender as ComboBox;
+        var xamlRoot = ((FrameworkElement)sender).XamlRoot;
+        foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
+        {
+            if (popup.Child is not UIElement popupRoot) continue;
+            if (FindDescendant<ScrollViewer>(popupRoot) is not { } scrollViewer)
+                continue;
+
+            _dropdownScrollViewer = scrollViewer;
+
+            if (_dropdownWheelSource is { } previous)
+                previous.RemoveHandler(UIElement.PointerWheelChangedEvent, (PointerEventHandler)DropdownWheelChanged);
+
+            popupRoot.AddHandler(
+                UIElement.PointerWheelChangedEvent,
+                (PointerEventHandler)DropdownWheelChanged,
+                handledEventsToo: true);
+            _dropdownWheelSource = popupRoot;
+
+            scrollViewer.ChangeView(null, 0, null, true);
+
+            var source = (FrameworkElement)sender;
+            DispatcherQueue.TryEnqueue(() => AlignPopupTopToElement(popup, popupRoot, source));
+            break;
+        }
+    }
+
+    private static void AlignPopupTopToElement(Popup popup, UIElement popupRoot, FrameworkElement anchor)
+    {
+        if (!popup.IsOpen) return;
+
+        var anchorTop = anchor.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+        var popupTop = popupRoot.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+
+        popup.VerticalOffset += anchorTop - popupTop;
+    }
+
+    private void DropdownWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dropdownScrollViewer is not { } scrollViewer) return;
+        if (_dropdownOwner is not { } comboBox) return;
+
+        var itemCount = comboBox.Items.Count;
+        if (itemCount == 0) return;
+
+        var delta = e.GetCurrentPoint(scrollViewer).Properties.MouseWheelDelta;
+        if (delta == 0) return;
+        e.Handled = true;
+
+        var itemHeight = scrollViewer.ExtentHeight / itemCount;
+        if (itemHeight <= 0) return;
+
+        var step = delta > 0 ? -itemHeight : itemHeight;
+        var offset = Math.Clamp(scrollViewer.VerticalOffset + step, 0, scrollViewer.ScrollableHeight);
+        scrollViewer.ChangeView(null, offset, null, true);
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match)
+                return match;
+
+            if (FindDescendant<T>(child) is { } nested)
+                return nested;
+        }
+
+        return null;
+    }
+
+    private void StyleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateStyleDescription();
 
     private void PromptTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -75,7 +212,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var style = ((ComboBoxItem)StyleComboBox.SelectedItem).Content?.ToString() ?? "None";
+            var style = SelectedStyle;
             var (fullPrompt, extraNegative, guidanceMultiplier) = BuildPrompt(prompt, style);
 
             var model = ModelCatalog.DreamShaperXLLightning;
@@ -94,7 +231,7 @@ public sealed partial class MainWindow : Window
             var inferenceStepsOverride = aspectChoice == "Square" ? (int?)null : (int)Math.Round(model.InferenceSteps * 1.5);
 
             // Impasto + Graphic Oil: same step boost Impasto used when it landed the liked look.
-            if (style == "Impasto" || style == "New Impasto" || style == "Graphic Oil")
+            if (style == "Impasto" || style == "Graphic Oil")
             {
                 var steps = inferenceStepsOverride ?? model.InferenceSteps;
                 inferenceStepsOverride = (int)Math.Round(steps * 1.5);
@@ -367,128 +504,11 @@ public sealed partial class MainWindow : Window
     private static (string Prompt, string ExtraNegative, float GuidanceScaleMultiplier) BuildPrompt(string prompt, string style) =>
         StylePromptBuilder.BuildPrompt(prompt, style);
 
-    private void StyleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateStyleDescription();
-
-    // Known WinUI3 bug (unpackaged desktop apps in particular): the window is misreported as
-    // "inactive," which breaks the automatic mouse-wheel-to-ScrollViewer routing a ComboBox
-    // dropdown normally relies on — the scrollbar shows and can be dragged, but the wheel does
-    // nothing (see microsoft-ui-xaml#8764/#8161/#10480; fixed once in WinAppSDK 1.4, regressed
-    // again in 1.6.1, not called out as fixed as of the 2.2.0 this project references). Rather
-    // than depend on an upstream fix, the dropdown's ScrollViewer is found once it opens and
-    // wheel input is applied to it directly via ChangeView, bypassing whatever automatic routing
-    // is broken.
-    private ScrollViewer? _dropdownScrollViewer;
-    private UIElement? _dropdownWheelSource;
-    private ComboBox? _dropdownOwner;
-
-    private void ScrollableComboBox_DropDownOpened(object sender, object e)
-    {
-        _dropdownOwner = sender as ComboBox;
-        var xamlRoot = ((FrameworkElement)sender).XamlRoot;
-        foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
-        {
-            if (popup.Child is not UIElement popupRoot) continue;
-            if (FindDescendant<ScrollViewer>(popupRoot) is not { } scrollViewer)
-                continue;
-
-            _dropdownScrollViewer = scrollViewer;
-
-            // Subscribing on the ScrollViewer alone wasn't enough: the wheel event is raised on
-            // whichever ComboBoxItem is under the pointer, and the item marks it handled, so a
-            // plain += on an ancestor never sees it. AddHandler with handledEventsToo listens at
-            // the popup root regardless of what already handled the event further down.
-            if (_dropdownWheelSource is { } previous)
-                previous.RemoveHandler(UIElement.PointerWheelChangedEvent, (PointerEventHandler)DropdownWheelChanged);
-
-            popupRoot.AddHandler(
-                UIElement.PointerWheelChangedEvent,
-                (PointerEventHandler)DropdownWheelChanged,
-                handledEventsToo: true);
-            _dropdownWheelSource = popupRoot;
-
-            // ComboBox's default behavior scrolls the popup so the *currently selected* item
-            // lines up with the closed box, rather than always opening from the top of the list —
-            // fine for a handful of items, but disorienting for a style list this long where the
-            // selection could be scrolled anywhere. Forcing it back to the top on every open makes
-            // it behave like the shorter Aspect/Model dropdowns, which never scroll to begin with.
-            scrollViewer.ChangeView(null, 0, null, true);
-
-            // Scrolling to the top only moves the list *inside* the popup; the popup itself is
-            // still placed to straddle the box (part above it, part below), because ComboBox
-            // positions it to overlay the closed box once the list no longer fits on screen.
-            // Nudging its offset lines the popup's top edge up with the box, so the list always
-            // reads as dropping down from where it was opened. Deferred because the popup hasn't
-            // been laid out yet at DropDownOpened time, so its position can't be measured here.
-            var source = (FrameworkElement)sender;
-            DispatcherQueue.TryEnqueue(() => AlignPopupTopToElement(popup, popupRoot, source));
-            break;
-        }
-    }
-
-    private static void AlignPopupTopToElement(Popup popup, UIElement popupRoot, FrameworkElement anchor)
-    {
-        if (!popup.IsOpen) return;
-
-        var anchorTop = anchor.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
-        var popupTop = popupRoot.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
-
-        popup.VerticalOffset += anchorTop - popupTop;
-    }
-
-    // Moves the view only, the same as dragging the scrollbar; the selection is left alone and
-    // still changes on click. Stepping the selection per notch instead (an earlier attempt) read
-    // as nothing happening at all, because the selected row carries no highlight, so the wheel
-    // silently walked rows that were already on screen until the selection fell off an edge.
-    // One notch scrolls exactly one row: the Windows delta is typically ±120 regardless of
-    // item height, so using it raw jumped three-plus styles at once. Animation is off so the
-    // list tracks the wheel 1:1 instead of easing behind a fast flick.
-    private void DropdownWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        if (_dropdownScrollViewer is not { } scrollViewer) return;
-        if (_dropdownOwner is not { } comboBox) return;
-
-        var itemCount = comboBox.Items.Count;
-        if (itemCount == 0) return;
-
-        var delta = e.GetCurrentPoint(scrollViewer).Properties.MouseWheelDelta;
-        if (delta == 0) return;
-        e.Handled = true;
-
-        var itemHeight = scrollViewer.ExtentHeight / itemCount;
-        if (itemHeight <= 0) return;
-
-        var step = delta > 0 ? -itemHeight : itemHeight;
-        var offset = Math.Clamp(scrollViewer.VerticalOffset + step, 0, scrollViewer.ScrollableHeight);
-        scrollViewer.ChangeView(null, offset, null, true);
-    }
-
-    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
-    {
-        var childCount = VisualTreeHelper.GetChildrenCount(root);
-        for (var i = 0; i < childCount; i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T match)
-                return match;
-
-            if (FindDescendant<T>(child) is { } nested)
-                return nested;
-        }
-
-        return null;
-    }
-
     private void UpdateStyleDescription()
     {
-        // StyleComboBox's declarative SelectedIndex="0" fires SelectionChanged during
-        // InitializeComponent, before StyleDescriptionText — declared later in the visual tree —
-        // has been constructed. Without this guard that's a null reference inside XAML's own
-        // construction sequence, which doesn't surface as a catchable .NET exception; it crashes
-        // the native XAML engine outright (observed as an access violation in
-        // Microsoft.UI.Xaml.dll).
         if (StyleDescriptionText is null) return;
 
-        var style = (StyleComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "None";
+        var style = SelectedStyle;
         StyleDescriptionText.Text = style switch
         {
             "Cartoon" => "Cartoon — bold outlines, bright colors, full scene",
@@ -511,7 +531,25 @@ public sealed partial class MainWindow : Window
             "Cyberpunk" => "Neon night city — rain, holograms, magenta/cyan dystopia",
             "Colorful Vector" => "Flat colorful vector — black background, bold saturated colors",
             "Minimalist" => "Flat vector minimalist — 5 colors, no gradients",
-            "New Impasto" => "Thick tube-squeezed oil paint — ridges, knife strokes, light on texture",
+            "Cubist" => "Cubist — geometric facets, abstract planes, fragmented form",
+            "Ink Wash" => "Chinese ink wash / sumi-e — soft washes, brush calligraphy",
+            "Kirigami" => "Kirigami — cut-and-fold paper, 3D Japanese precision",
+            "Line Art" => "Line art — sleek minimalist vector outlines",
+            "Low Poly" => "Low poly — blocky game-art meshes, hard edges",
+            "Minecraft" => "Minecraft — blocky pixel voxels, vibrant game look",
+            "Film Noir" => "Film noir — high-contrast mono, 1940s dramatic shadows",
+            "Impressionist" => "Impressionist — loose brushwork, light over form",
+            "Pointillism" => "Pointillism — image built from tiny dots of color",
+            "Pop Art" => "Pop art — bright colors, bold outlines, kitsch",
+            "Steampunk" => "Steampunk — brass, copper, gears, antique mechanical",
+            "Origami" => "Origami — folded paper, pleats, clean geometric form",
+            "Paper Quilling" => "Paper quilling — coiled strips, ornamental loops",
+            "Paper Cut Collage" => "Paper cut collage — layered mixed-media paper cuts",
+            "Papercut Shadow Box" => "Papercut shadow box — layered silhouettes with depth",
+            "Silhouette" => "Silhouette — high-contrast black-and-white shapes",
+            "Stacked Papercut" => "Stacked papercut — precision-cut layered depth",
+            "Tribal" => "Tribal — bold indigenous patterns, natural colors",
+            "Zentangle" => "Zentangle — intricate monochrome meditative patterns",
             _ => "No style applied — just your prompt, as the model interprets it by default", // None
         };
     }

@@ -7,7 +7,7 @@
     xmlns:local="using:TXT2IMG"
     mc:Ignorable="d"
     Title="TXT2IMG">
-    <Grid Padding="24">
+    <Grid x:Name="RootGrid" Padding="24">
         <Grid.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                 <GradientStop Color="#FF15141A" Offset="0" />
@@ -48,36 +48,9 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Prompts and images stay on this PC — generation is local. (First run will download the model.)" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" VerticalAlignment="Center" />
-                        <ComboBox x:Name="StyleComboBox" Grid.Column="1" Width="170" Height="40" Margin="10,0,0,0" SelectedIndex="0" MaxDropDownHeight="420" ToolTipService.ToolTip="Style" SelectionChanged="StyleComboBox_SelectionChanged" DropDownOpened="ScrollableComboBox_DropDownOpened" BorderBrush="{StaticResource StyleAccentBrush}" BorderThickness="2" ItemContainerStyle="{StaticResource PointerOnlyComboBoxItemStyle}">
-                            <!-- Deliberately shorter than the full style list. A popup taller than the
-                                 window gets clipped by it, yet its own ScrollViewer still measures a
-                                 viewport tall enough for every item — so it reports nothing to scroll and
-                                 the clipped entries become unreachable. A height the window can always
-                                 honor keeps the ScrollViewer genuinely scrollable; the wheel then works
-                                 through ScrollableComboBox_DropDownOpened's WinUI routing workaround. -->
-                            <ComboBoxItem Content="None" />
-                            <ComboBoxItem Content="3D Render" />
-                            <ComboBoxItem Content="Anime" />
-                            <ComboBoxItem Content="Black &amp; White" />
-                            <ComboBoxItem Content="Cartoon" />
-                            <ComboBoxItem Content="Claymation" />
-                            <ComboBoxItem Content="Comic Book" />
-                            <ComboBoxItem Content="Colorful Vector" />
-                            <ComboBoxItem Content="Concept Art" />
-                            <ComboBoxItem Content="Cyberpunk" />
-                            <ComboBoxItem Content="Dark Fantasy" />
-                            <ComboBoxItem Content="Fantasy Art" />
-                            <ComboBoxItem Content="Futuristic" />
-                            <ComboBoxItem Content="Graphic Oil" />
-                            <ComboBoxItem Content="Icon" />
-                            <ComboBoxItem Content="Minimalist" />
-                            <ComboBoxItem Content="New Impasto" />
-                            <ComboBoxItem Content="Oil Painting" />
-                            <ComboBoxItem Content="Pixel Art" />
-                            <ComboBoxItem Content="Soft Oil" />
-                            <ComboBoxItem Content="Vintage Photo" />
-                            <ComboBoxItem Content="Watercolor" />
-                        </ComboBox>
+                        <!-- GitHub-proven ComboBox: wheel via ScrollableComboBox_DropDownOpened
+                             (microsoft-ui-xaml#8764); AlignPopupTopToElement keeps the popup on the box. -->
+                        <ComboBox x:Name="StyleComboBox" Grid.Column="1" Width="170" Height="40" Margin="10,0,0,0" MaxDropDownHeight="420" ToolTipService.ToolTip="Style" SelectionChanged="StyleComboBox_SelectionChanged" DropDownOpened="ScrollableComboBox_DropDownOpened" BorderBrush="{StaticResource StyleAccentBrush}" BorderThickness="2" ItemContainerStyle="{StaticResource PointerOnlyComboBoxItemStyle}" />
                         <ComboBox x:Name="AspectComboBox" Grid.Column="2" Width="170" Height="40" Margin="10,0,0,0" SelectedIndex="1" ToolTipService.ToolTip="Aspect ratio" SelectionChanged="AspectComboBox_SelectionChanged">
                             <ComboBoxItem Content="Square" />
                             <ComboBoxItem Content="Landscape (16:9)" />
@@ -205,5 +178,6 @@
                 </Grid>
             </Border>
         </Grid>
+
     </Grid>
 </Window>

@@ -23,9 +23,8 @@
             <SolidColorBrush x:Key="StyleAccentBrush" Color="#FF8C6CFF" />
 
             <!-- A dropdown row that only reacts to the pointer, never to being the current
-                 selection. The mouse wheel steps the selection through the style list, so the
-                 default template's selected fill trailed the pointer down the list and competed
-                 with the hover highlight that actually shows what a click would pick.
+                 selection. Without this, the selected-row accent pill stays fixed while the
+                 list scrolls under the wheel and competes with the hover highlight.
 
                  This replaces the template rather than overriding the ComboBoxItemBackgroundSelected*
                  brushes, because the default template applies those from inside a Storyboard, where

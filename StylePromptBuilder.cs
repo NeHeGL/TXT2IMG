@@ -58,14 +58,19 @@ public static class StylePromptBuilder
     // computer icon). Pixel Art has the same failure mode.
     public static readonly HashSet<string> FlatSimplifyStyles = new(StringComparer.Ordinal)
     {
-        "Icon", "Pixel Art",
+        "Cubist", "Icon", "Kirigami", "Line Art", "Pixel Art",
+        "Low Poly", "Minecraft", "Origami",
+        "Paper Cut Collage", "Paper Quilling", "Papercut Shadow Box", "Silhouette",
+        "Stacked Papercut",
+        "Tribal", "Zentangle",
     };
 
     // Ink/graphic styles also lose to the photo on reference restyles (live Comic Book + Cartoon:
     // photoreal stranger, no ink/halftone).
     public static readonly HashSet<string> GraphicInkStyles = new(StringComparer.Ordinal)
     {
-        "Comic Book", "Cartoon", "Cel-Shaded", "Anime",
+        "Anime", "Cartoon", "Cel-Shaded", "Comic Book", "Ink Wash", "Line Art",
+        "Silhouette",
     };
 
     // Medium locks are subject-agnostic — never assume person/face.
@@ -327,6 +332,83 @@ public static class StylePromptBuilder
         return string.IsNullOrWhiteSpace(stripped) ? prompt.Trim() : stripped;
     }
 
+    // Exact templates from StyleSelectorXL / DreamStudio (sdxl_styles.json).
+    // https://github.com/ahgsql/StyleSelectorXL/blob/main/sdxl_styles.json
+    // Applied as-is: {prompt} is replaced with the user's text (no subject-first rewrite).
+    private static readonly Dictionary<string, (string Template, string Negative)> StyleSelectorXlTemplates =
+        new(StringComparer.Ordinal)
+        {
+            ["Line Art"] = (
+                "line art drawing {prompt} . professional, sleek, modern, minimalist, graphic, line art, vector graphics",
+                "anime, photorealistic, 35mm film, deformed, glitch, blurry, noisy, off-center, deformed, cross-eyed, closed eyes, bad anatomy, ugly, disfigured, mutated, realism, realistic, impressionism, expressionism, oil, acrylic"),
+            // StyleSelectorXL base + anti-multi fence (live: sometimes two figures / split composition).
+            ["Low Poly"] = (
+                "low-poly style {prompt} . low-poly game art, polygon mesh, jagged, blocky, wireframe edges, " +
+                "centered composition, single subject, one composition",
+                "noisy, sloppy, messy, grainy, highly detailed, ultra textured, photo, " +
+                "split screen, diptych, side by side, two panels, collage, multi-panel, " +
+                "two subjects, multiple subjects, dual figure, twin, mirrored duplicate, comparison layout"),
+            ["Origami"] = (
+                "origami style {prompt} . paper art, pleated paper, folded, origami art, pleats, cut and fold, centered composition",
+                "noisy, sloppy, messy, grainy, highly detailed, ultra textured, photo"),
+            ["Cubist"] = (
+                "Cubist artwork {prompt} . Geometric shapes, abstract, innovative, revolutionary",
+                "anime, photorealistic, 35mm film, deformed, glitch, low contrast, noisy"),
+            // StyleSelectorXL base + anti-swarm fence (live: many copies of the subject in one panel).
+            // Dropped "characters and objects / game assets" — that phrase invites crowds and grids.
+            ["Minecraft"] = (
+                "Minecraft style {prompt} . Blocky, pixelated, vibrant colors, single subject, " +
+                "one character, centered composition, one composition",
+                "smooth, realistic, detailed, photorealistic, noise, blurry, deformed, " +
+                "crowd, many copies, multiple subjects, duplicate characters, clone army, " +
+                "grid of characters, sprite sheet, character select screen, wallpaper pattern, " +
+                "tiled repeats, herd, flock, swarm, split screen, diptych, collage, multi-panel"),
+            // StyleSelectorXL base + subject fence (live "jungle": seamless tribal wallpaper, no scene).
+            ["Tribal"] = (
+                "Tribal style {prompt} . Indigenous, ethnic, traditional patterns, bold, natural colors, " +
+                "highly detailed, clear recognizable subject, subject as main focus, not a pattern fill",
+                "modern, futuristic, minimalist, pastel, " +
+                "abstract pattern only, seamless pattern, wallpaper, textile print, repeating motif, " +
+                "no subject, missing subject, pure ornament, decorative border only"),
+            ["Zentangle"] = (
+                "Zentangle {prompt} . Intricate, abstract, monochrome, patterns, meditative, highly detailed",
+                "colorful, representative, simplistic, large fields of color"),
+            ["Kirigami"] = (
+                "Kirigami representation of {prompt} . 3D, paper folding, paper cutting, Japanese, intricate, symmetrical, precision, clean lines",
+                "painting, drawing, 2D, noisy, blurry, deformed"),
+            ["Paper Quilling"] = (
+                "Paper quilling art of {prompt} . Intricate, delicate, curling, rolling, shaping, coiling, loops, 3D, dimensional, ornamental",
+                "photo, painting, drawing, 2D, flat, deformed, noisy, blurry"),
+            ["Paper Cut Collage"] = (
+                "Papercut collage of {prompt} . Mixed media, textured paper, overlapping, asymmetrical, abstract, vibrant",
+                "photo, 3D, realistic, drawing, painting, high detail, disfigured"),
+            ["Papercut Shadow Box"] = (
+                "3D papercut shadow box of {prompt} . Layered, dimensional, depth, silhouette, shadow, papercut, handmade, high contrast",
+                "painting, drawing, photo, 2D, flat, high detail, blurry, noisy, disfigured"),
+            ["Stacked Papercut"] = (
+                "Stacked papercut art of {prompt} . 3D, layered, dimensional, depth, precision cut, stacked layers, papercut, high contrast",
+                "2D, flat, noisy, blurry, painting, drawing, photo, deformed"),
+            ["Silhouette"] = (
+                "Silhouette style {prompt} . High contrast, minimalistic, black and white, stark, dramatic",
+                "ugly, deformed, noisy, blurry, low contrast, color, realism, photorealistic"),
+            // New* trials — exact StyleSelectorXL (A/B on DreamShaper Lightning).
+            ["Film Noir"] = (
+                "Film noir style {prompt} . Monochrome, high contrast, dramatic shadows, 1940s style, mysterious, cinematic",
+                "ugly, deformed, noisy, blurry, low contrast, realism, photorealistic, vibrant, colorful"),
+            ["Impressionist"] = (
+                "Impressionist painting {prompt} . Loose brushwork, vibrant color, light and shadow play, captures feeling over form",
+                "anime, photorealistic, 35mm film, deformed, glitch, low contrast, noisy"),
+            ["Pointillism"] = (
+                "Pointillism style {prompt} . Composed entirely of small, distinct dots of color, vibrant, highly detailed",
+                "line drawing, smooth shading, large color fields, simplistic"),
+            ["Pop Art"] = (
+                "Pop Art style {prompt} . Bright colors, bold outlines, popular culture themes, ironic or kitsch",
+                "ugly, deformed, noisy, blurry, low contrast, realism, photorealistic, minimalist"),
+            ["Steampunk"] = (
+                "Steampunk style {prompt} . Antique, mechanical, brass and copper tones, gears, intricate, detailed",
+                "deformed, glitch, noisy, low contrast, anime, photorealistic"),
+        };
+
     public static (string Prompt, string ExtraNegative, float GuidanceScaleMultiplier) BuildPrompt(string prompt, string style)
     {
         // No style suffix, no extra negative terms, no guidance bump — just the user's own
@@ -334,6 +416,12 @@ public static class StylePromptBuilder
         if (style == "None")
         {
             return (prompt, "", 1f);
+        }
+
+        // StyleSelectorXL trials: exact JSON templates, {prompt} = user text, CFG unchanged.
+        if (StyleSelectorXlTemplates.TryGetValue(style, out var xl))
+        {
+            return (xl.Template.Replace("{prompt}", prompt), xl.Negative, 1f);
         }
 
         // The subject goes first: earlier tokens carry more weight in the text encoder, so
@@ -585,22 +673,18 @@ public static class StylePromptBuilder
                 "detailed, organic shapes, painterly, watercolor, oil painting",
                 2.0f),
 
-            // Thick tube-paint / ridge look. Keep subject first — medium-first prompts ate subjects.
-            // A "filling the frame" + gallery-negative variant was tried and reverted: it collapsed
-            // into split-screen/photo panels and unrelated props instead of painted subjects.
-            "New Impasto" => (
-                "impasto painting of the subject, thick layers of oil paint, paint applied directly from the tube, " +
-                "clearly visible brush and palette-knife strokes, three-dimensional paint texture, " +
-                "light reflections on thick paint, expressive intense colors, textured canvas, " +
-                "dramatic raking light revealing paint thickness, clear recognizable subject",
-                "photo, photorealistic, realistic, DSLR, smooth, flat paint, airbrushed, low texture, plastic, CGI, " +
-                "palette knife in frame, paintbrush in frame, paint tube, easel, art supplies, " +
-                "macro of paint only, no subject, missing subject, anime, cartoon, comic, vector art, " +
-                "split screen, diptych, side by side, two panels, letterbox bars, " +
-                "food, bowl, soup, plate, meal, ornate frame",
-                ImpastoGuidanceMultiplier),
+            // Ink Wash is not in StyleSelectorXL — local recipe (SD Art Chinese-painting tip).
+            "Ink Wash" => (
+                "traditional Chinese ink wash painting of the subject, sumi-e, flowing black ink brushstrokes, " +
+                "soft ink washes, rice paper texture, elegant negative space, classical East Asian painting, " +
+                "graceful calligraphic lines, muted ink tones with subtle color accents",
+                "photo, photorealistic, DSLR, oil painting, thick impasto, Western watercolor blooms, " +
+                "comic book, anime, vector art, neon, cyberpunk, 3d render, CGI, heavy saturation, " +
+                "pop art, graffiti, photoreal skin, glossy digital art",
+                1.6f),
 
             // Full scenic cartoon - kill abstract geometric junk (live: panel 1 cubist tower).
+            // Other "New *" StyleSelectorXL trials are handled above via StyleSelectorXlTemplates.
             _ => (
                 "cartoon illustration of the subject, bold clean outlines, bright cheerful colors, " +
                 "playful exaggerated proportions, full coherent cartoon scene with sky and background",
@@ -658,7 +742,7 @@ public static class StylePromptBuilder
         }
 
         // Impasto + boat: medium/tool words steal the subject (live: palette knife macros).
-        if ((style == "Impasto" || style == "New Impasto") && PromptImpliesWatercraft(prompt))
+        if (style == "Impasto" && PromptImpliesWatercraft(prompt))
         {
             subjectLead = $"{subjectLead}, a boat on the water, the boat is the main subject";
             var boatNeg =
@@ -671,7 +755,7 @@ public static class StylePromptBuilder
 
         // Equal weight: user subject and style medium both early.
         // Impasto: SUBJECT first — medium-first ate the boat (live palette-knife macros).
-        if (style == "Impasto" || style == "New Impasto")
+        if (style == "Impasto")
         {
             return (
                 $"{subjectLead}, {styleSuffix}, raised paint ridges on the subject, one composition, " +
