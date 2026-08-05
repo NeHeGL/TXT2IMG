@@ -19,7 +19,8 @@ public interface IImageGenerator
         IProgress<double>? progressFillCallback = null,
         float strength = 0.45f,
         float? guidanceScaleOverride = null,
-        int? inferenceStepsOverride = null);
+        int? inferenceStepsOverride = null,
+        int? batchSizeOverride = null);
 }
 
 public class LocalImageGenerator : IImageGenerator
@@ -57,7 +58,8 @@ public class LocalImageGenerator : IImageGenerator
         IProgress<double>? progressFillCallback = null,
         float strength = 0.45f,
         float? guidanceScaleOverride = null,
-        int? inferenceStepsOverride = null)
+        int? inferenceStepsOverride = null,
+        int? batchSizeOverride = null)
     {
         if (!ModelDownloader.IsModelPresent(model))
         {
@@ -92,40 +94,50 @@ public class LocalImageGenerator : IImageGenerator
                 _loadedModelId = model.Id;
             }
 
+            var batchCount = batchSizeOverride is > 0 ? batchSizeOverride.Value : BatchSize;
+
+            // OnnxStack Seed batches IGNORE ValueFrom. The real seed is SchedulerOptions.Seed
+            // (0 = library picks a random base). Extra slots come from new Random(base).Next(),
+            // not seed+1. Always set Seed explicitly.
+            var baseSeed = Random.Shared.Next(1, int.MaxValue);
+
+            var negative = string.IsNullOrEmpty(extraNegativePrompt)
+                ? BaseNegativePrompt
+                : $"{BaseNegativePrompt}, {extraNegativePrompt}";
+            var scheduler = _pipeline!.DefaultSchedulerOptions with
+            {
+                Width = widthOverride ?? model.SampleSize,
+                Height = heightOverride ?? model.SampleSize,
+                InferenceSteps = inferenceStepsOverride ?? model.InferenceSteps,
+                GuidanceScale = guidanceScaleOverride ?? model.GuidanceScale,
+                SchedulerType = model.Scheduler,
+                Seed = baseSeed
+            };
+
             var batchOptions = new GenerateBatchOptions
             {
-                // OnnxStack's seed-batch generator returns exactly ValueTo images (not ValueTo + 1);
-                // decompiled BatchGenerator.GenerateBatch confirms count == ValueTo for ValueTo > 1.
+                // ValueTo = image count for BatchType.Seed (not an end-seed).
                 BatchType = BatchOptionType.Seed,
-                ValueFrom = 0,
-                ValueTo = BatchSize,
-                Increment = 1,
+                ValueTo = batchCount,
                 Prompt = prompt,
-                NegativePrompt = string.IsNullOrEmpty(extraNegativePrompt) ? BaseNegativePrompt : $"{BaseNegativePrompt}, {extraNegativePrompt}",
-                SchedulerOptions = _pipeline!.DefaultSchedulerOptions with
-                {
-                    Width = widthOverride ?? model.SampleSize,
-                    Height = heightOverride ?? model.SampleSize,
-                    InferenceSteps = inferenceStepsOverride ?? model.InferenceSteps,
-                    GuidanceScale = guidanceScaleOverride ?? model.GuidanceScale,
-                    SchedulerType = model.Scheduler
-                }
+                NegativePrompt = negative,
+                SchedulerOptions = scheduler
             };
 
             if (baseImageBytes is not null)
             {
                 batchOptions.Diffuser = DiffuserType.ImageToImage;
                 batchOptions.InputImage = await OnnxImage.FromBytesAsync(baseImageBytes);
-                batchOptions.SchedulerOptions = batchOptions.SchedulerOptions with { Strength = strength };
+                batchOptions.SchedulerOptions = scheduler with { Strength = strength };
             }
 
             // "Generating N of BatchSize" names the one currently in flight, not the count
             // completed so far — there's no separate "started" signal from GenerateBatchAsync,
             // only completions, so as each one finishes we announce the next one starting
             // (skipped once there is no next one).
-            statusCallback?.Report($"Generating 1 of {BatchSize}");
+            statusCallback?.Report($"Generating 1 of {batchCount}");
             progressFillCallback?.Report(0.0);
-            var images = new List<byte[]>(BatchSize);
+            var images = new List<byte[]>(batchCount);
             await foreach (var batchResult in _pipeline.GenerateBatchAsync(batchOptions))
             {
                 byte[] bytes;
@@ -135,10 +147,10 @@ public class LocalImageGenerator : IImageGenerator
                 }
                 imageCallback?.Report((images.Count, bytes));
                 images.Add(bytes);
-                progressFillCallback?.Report((double)images.Count / BatchSize);
-                if (images.Count < BatchSize)
+                progressFillCallback?.Report((double)images.Count / batchCount);
+                if (images.Count < batchCount)
                 {
-                    statusCallback?.Report($"Generating {images.Count + 1} of {BatchSize}");
+                    statusCallback?.Report($"Generating {images.Count + 1} of {batchCount}");
                 }
             }
             return images;

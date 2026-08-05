@@ -22,6 +22,68 @@
                  screen) so the color itself signals they're related, since proximity can't. -->
             <SolidColorBrush x:Key="StyleAccentBrush" Color="#FF8C6CFF" />
 
+            <!-- A dropdown row that only reacts to the pointer, never to being the current
+                 selection. The mouse wheel steps the selection through the style list, so the
+                 default template's selected fill trailed the pointer down the list and competed
+                 with the hover highlight that actually shows what a click would pick.
+
+                 This replaces the template rather than overriding the ComboBoxItemBackgroundSelected*
+                 brushes, because the default template applies those from inside a Storyboard, where
+                 a ThemeResource resolves against the framework's own dictionary and ignores anything
+                 an app defines. Dropping the selected states also drops the accent pill they animate.
+
+                 The pointer fills are translucent white over whatever the popup paints, matched by
+                 eye to the default hover and pressed shades. -->
+            <Style x:Key="PointerOnlyComboBoxItemStyle" TargetType="ComboBoxItem">
+                <Setter Property="Padding" Value="12,4" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBoxItem">
+                            <Grid x:Name="LayoutRoot" Background="{TemplateBinding Background}" Margin="5,2,5,2"
+                                  CornerRadius="{TemplateBinding CornerRadius}" Control.IsTemplateFocusTarget="True">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="Selected" />
+                                        <VisualState x:Name="SelectedUnfocused" />
+                                        <VisualState x:Name="SelectedDisabled" />
+                                        <VisualState x:Name="Disabled" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="LayoutRoot.Background" Value="#19FFFFFF" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="SelectedPointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="LayoutRoot.Background" Value="#19FFFFFF" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="LayoutRoot.Background" Value="#0FFFFFFF" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="SelectedPressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="LayoutRoot.Background" Value="#0FFFFFFF" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="ContentPresenter"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Margin="{TemplateBinding Padding}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style x:Key="ResultSlotButtonStyle" TargetType="Button">
                 <Setter Property="Padding" Value="4" />
                 <Setter Property="Background" Value="{StaticResource ResultSlotBackgroundBrush}" />

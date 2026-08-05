@@ -108,10 +108,38 @@ function Click-Txt2ImgClient([int]$X, [int]$Y) {
 }
 
 function Type-Txt2ImgText([string]$Text) {
-    # Always click the prompt box first so paste doesn't land on Style/Generate.
-    Click-Txt2ImgClient 400 145
-    Start-Sleep -Milliseconds 200
+    # Prefer UIA ValuePattern on PromptTextBox — fixed client coords miss on some DPI setups.
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName System.Windows.Forms
+    Focus-Txt2Img | Out-Null
+    $hwnd = Get-Txt2ImgHwnd
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$hwnd)
+    $idCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        "PromptTextBox")
+    $edit = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $idCond)
+    if (-not $edit) {
+        $editCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit)
+        $edits = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCond)
+        if ($edits.Count -gt 0) { $edit = $edits.Item(0) }
+    }
+    if ($edit) {
+        $edit.SetFocus()
+        Start-Sleep -Milliseconds 150
+        try {
+            $vp = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            $vp.SetValue($Text)
+            return
+        } catch {}
+        $rect = $edit.Current.BoundingRectangle
+        [UiDrive]::ClickScreen([int]($rect.X + $rect.Width / 2), [int]($rect.Y + $rect.Height / 2))
+    } else {
+        Click-Txt2ImgClient 400 145
+    }
+    Start-Sleep -Milliseconds 200
     Set-Clipboard -Value $Text
     [System.Windows.Forms.SendKeys]::SendWait("^a")
     Start-Sleep -Milliseconds 120

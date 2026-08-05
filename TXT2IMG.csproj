@@ -4,6 +4,8 @@
     <UseWinUI>true</UseWinUI>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Snapshot copies and tool harnesses must not compile into the app. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);backups\**;tools\**</DefaultItemExcludes>
     <ApplicationId>f1fa6523-9c26-4dc5-a6bf-4bcf9fbb5bcd</ApplicationId>
     <OutputType>WinExe</OutputType>
     <WindowsPackageType>None</WindowsPackageType>

@@ -1,11 +1,10 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
 using Windows.Storage.Pickers;
 using Windows.Storage;
 using Windows.System;
@@ -14,7 +13,6 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace TXT2IMG;
@@ -31,38 +29,15 @@ public sealed partial class MainWindow : Window
         new ResultItem(), new ResultItem(), new ResultItem(), new ResultItem(), new ResultItem()
     });
 
-    // Purely which result slot's badge is highlighted as "currently the reference photo" — not
-    // itself the source of truth for the base image (see _refImageBytes for that). -1 means no
-    // result slot is highlighted.
-    private int _selectedIndex = -1;
-
-    // The img2img base for the next generate, whether it came from loading a file
-    // (AddRefPhotoButton_Click) or selecting a result via its ↻ badge
-    // (ResultSlot_ToggleBase_Click) — both now do the same thing: populate this and the
-    // Reference Photo panel. Persists across generates until cleared, since it isn't wiped
-    // along with the result slots on each new batch.
-    private byte[]? _refImageBytes;
-
     public MainWindow()
     {
         this.InitializeComponent();
         ResultsPanel.ItemsSource = Results;
-        // Tall enough that the Style dropdown's popup — capped at the window's own height, not
-        // just MaxDropDownHeight, since it can't extend past the bottom of the window it lives
-        // in — has room to show every style without needing to scroll.
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 1100));
+        // Height is tuned so the preview box — locked to the selected aspect ratio and therefore
+        // limited by the card's width, not its height — leaves no vertical slack. Any surplus
+        // becomes empty gaps above and below it, since the box is centered in its row.
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1160, 1090));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-
-        // Shrinking below this made every box (and the results row with it) keep recomputing
-        // to a smaller size to fit, so text and images kept shrinking the further down you
-        // resized. Blocking resizes below the comfortable default instead means everything
-        // always renders at that same fixed, legible size — maximizing still works, only
-        // shrinking past the point things start looking cramped is disallowed.
-        //if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
-        //{
-        //    presenter.PreferredMinimumWidth = 1200;
-        //    presenter.PreferredMinimumHeight = 900;
-        //}
 
         UpdateStyleDescription();
     }
@@ -93,17 +68,14 @@ public sealed partial class MainWindow : Window
         PromptTextBox.IsEnabled = false;
         GenerateButton.Content = "Starting...";
 
-        // Changing style/aspect/model/ref photo/creativity mid-batch would apply to nothing —
-        // the in-flight batch already captured its own settings — while looking like it should
-        // affect what's currently generating. Locking everything until the batch finishes avoids
-        // that confusion.
+        // Changing style/aspect mid-batch would apply to nothing — the in-flight batch already
+        // captured its own settings — while looking like it should affect what's currently
+        // generating. Locking everything until the batch finishes avoids that confusion.
         SetControlsEnabled(false);
 
         try
         {
             var style = ((ComboBoxItem)StyleComboBox.SelectedItem).Content?.ToString() ?? "None";
-            byte[]? baseImageBytes = _refImageBytes;
-
             var (fullPrompt, extraNegative, guidanceMultiplier) = BuildPrompt(prompt, style);
 
             var model = ModelCatalog.DreamShaperXLLightning;
@@ -121,39 +93,23 @@ public sealed partial class MainWindow : Window
             // is left untouched since it isn't affected.
             var inferenceStepsOverride = aspectChoice == "Square" ? (int?)null : (int)Math.Round(model.InferenceSteps * 1.5);
 
+            // Impasto + Graphic Oil: same step boost Impasto used when it landed the liked look.
+            if (style == "Impasto" || style == "New Impasto" || style == "Graphic Oil")
+            {
+                var steps = inferenceStepsOverride ?? model.InferenceSteps;
+                inferenceStepsOverride = (int)Math.Round(steps * 1.5);
+            }
+
+            // Max Detail: more denoising steps only (not higher resolution). Doubles whatever
+            // step count we would have used — slower, often cleaner anatomy/detail.
+            if (MaxDetailCheckBox.IsChecked == true)
+            {
+                var steps = inferenceStepsOverride ?? model.InferenceSteps;
+                inferenceStepsOverride = (int)Math.Round(steps * 2.0);
+            }
+
             var statusCallback = new Progress<string>(status => GenerateButton.Content = status);
             var progressFillCallback = new Progress<double>(SetGenerateButtonFill);
-
-            // Reference + Style: photo medium is sticky. Style tokens must lead, denoise must be
-            // high, and CFG needs a floor — otherwise you get a different photoreal face (live).
-            const float ReferenceEditStrength = 0.78f;
-            const float ReferenceStyleStrength = 0.88f;
-            var strength = baseImageBytes is null
-                ? 0.45f
-                : (style != "None" ? ReferenceStyleStrength : ReferenceEditStrength);
-
-            if (baseImageBytes is not null && style != "None")
-            {
-                fullPrompt = BuildReferenceStylePrompt(prompt, style);
-                extraNegative = string.IsNullOrEmpty(extraNegative)
-                    ? "photo, photograph, photorealistic, realistic, DSLR, real skin pores, candid shot"
-                    : $"{extraNegative}, photo, photograph, photorealistic, realistic, DSLR, real skin pores, candid shot";
-                guidanceScaleOverride = Math.Max(guidanceScaleOverride ?? model.GuidanceScale, 5.5f);
-                var styleSteps = (int)Math.Round(model.InferenceSteps * 1.5);
-                inferenceStepsOverride = inferenceStepsOverride is null
-                    ? styleSteps
-                    : Math.Max(inferenceStepsOverride.Value, styleSteps);
-            }
-            else if (style == "None" && baseImageBytes is not null)
-            {
-                fullPrompt = BuildReferenceEditPrompt(prompt);
-                // DreamShaper drifts identity/race on strong edits (live: Black woman → white elderly).
-                extraNegative = string.IsNullOrEmpty(extraNegative)
-                    ? ReferenceIdentityNegative
-                    : $"{extraNegative}, {ReferenceIdentityNegative}";
-                // Slightly gentler than style restyle so skin tone/face from the photo can hold.
-                strength = 0.72f;
-            }
 
             // Every generate produces a brand new set of results, replacing whatever was shown
             // before; each image is dropped into its slot as soon as it's ready instead of
@@ -164,7 +120,6 @@ public sealed partial class MainWindow : Window
                 Results[i].Bytes = null;
                 Results[i].Thumbnail = null;
             }
-            _selectedIndex = -1;
             PreviewImage.Source = null;
             CurrentImageBytes = null;
             CurrentStyle = null;
@@ -178,6 +133,11 @@ public sealed partial class MainWindow : Window
                 {
                     var (index, bytes) = result;
                     if (index >= Results.Count) return;
+
+                    // Black & White: model still leaks color from prompts/lighting (live: orange water).
+                    // Force grayscale on pixels — prompt strip alone is not enough.
+                    if (style == "Black & White")
+                        bytes = await PngGrayscale.ConvertAsync(bytes);
 
                     Results[index].Bytes = bytes;
                     Results[index].RawPrompt = prompt;
@@ -196,7 +156,11 @@ public sealed partial class MainWindow : Window
                 }
             });
 
-            await _imageGenerator.GenerateImagesAsync(model, fullPrompt, baseImageBytes, statusCallback, imageCallback, extraNegative, widthOverride, heightOverride, progressFillCallback, strength, guidanceScaleOverride, inferenceStepsOverride);
+            await _imageGenerator.GenerateImagesAsync(
+                model, fullPrompt, baseImageBytes: null, statusCallback, imageCallback,
+                extraNegative, widthOverride, heightOverride, progressFillCallback,
+                guidanceScaleOverride: guidanceScaleOverride,
+                inferenceStepsOverride: inferenceStepsOverride);
         }
         catch (Exception ex)
         {
@@ -220,14 +184,9 @@ public sealed partial class MainWindow : Window
     {
         StyleComboBox.IsEnabled = enabled;
         AspectComboBox.IsEnabled = enabled;
-        AddRefPhotoButton.IsEnabled = enabled;
-        // Clear Reference Photo's enabled state normally tracks whether one is actually loaded
-        // (see AddRefPhotoButton_Click / ClearRefPhoto) — re-enabling it unconditionally here
-        // would let you "clear" a reference photo that isn't there.
-        ClearRefPhotoButton.IsEnabled = enabled && _refImageBytes is not null;
+        MaxDetailCheckBox.IsEnabled = enabled;
         CopyButton.IsEnabled = enabled;
         SaveButton.IsEnabled = enabled;
-        MakeReferenceButton.IsEnabled = enabled;
     }
 
     // While a model is downloading, the button's own background becomes the progress bar —
@@ -334,14 +293,18 @@ public sealed partial class MainWindow : Window
         var file = await picker.PickSaveFileAsync();
         if (file is null) return;
 
-        await FileIO.WriteBytesAsync(file, CurrentImageBytes);
+        await FileIO.WriteBytesAsync(file, EmbedSaveMetadata(CurrentImageBytes));
+    }
+
+    // Invisible PNG tEXt — prompt and style only.
+    private byte[] EmbedSaveMetadata(byte[] png)
+    {
+        var withPrompt = PngTextChunk.Embed(png, "TXT2IMG Prompt", CurrentRawPrompt ?? "");
+        return PngTextChunk.Embed(withPrompt, "TXT2IMG Style", CurrentStyle ?? "");
     }
 
     private void ResultSlot_Click(object sender, RoutedEventArgs e)
     {
-        // Preview only — this must never change _selectedIndex. Conflating "look at this"
-        // with "build on this" was the bug behind every image inheriting the same shape:
-        // a plain click to preview one result silently became the base for the next prompt.
         if (sender is not Button button || button.Tag is not ResultItem item) return;
         if (item.Bytes is null) return;
 
@@ -350,114 +313,14 @@ public sealed partial class MainWindow : Window
         ShowPreview(index);
     }
 
-    private async void ResultSlot_ToggleBase_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button button || button.Tag is not ResultItem item) return;
-        if (item.Bytes is null) return;
-
-        var index = Results.IndexOf(item);
-        if (index < 0) return;
-
-        if (_selectedIndex == index)
-        {
-            // Tapping the already-selected badge again deselects it: the next
-            // generate goes back to a fresh text2img batch instead of building on it.
-            item.IsActive = false;
-            _selectedIndex = -1;
-            ClearRefPhoto();
-        }
-        else
-        {
-            // Selecting a result now behaves exactly like loading it as a reference photo —
-            // the Reference Photo panel updates to show it — rather than silently tracking an
-            // index with no visible confirmation anywhere except the badge's own border.
-            await SetReferencePhotoAsync(item.Bytes, index);
-        }
-    }
-
-    private async void MakeReferenceButton_Click(object sender, RoutedEventArgs e)
-    {
-        // CurrentImageBytes and _currentPreviewIndex are always set together (see ShowPreview
-        // and the batch-start reset above), so a non-null CurrentImageBytes guarantees a valid index.
-        if (CurrentImageBytes is null)
-        {
-            await ShowMessageAsync("No image to use as a reference.");
-            return;
-        }
-
-        await SetReferencePhotoAsync(CurrentImageBytes, _currentPreviewIndex);
-    }
-
-    private async Task SetReferencePhotoAsync(byte[] bytes, int resultIndex)
-    {
-        if (_selectedIndex >= 0) Results[_selectedIndex].IsActive = false;
-        Results[resultIndex].IsActive = true;
-        _selectedIndex = resultIndex;
-
-        _refImageBytes = bytes;
-        RefPhotoThumbnail.Source = await LoadBitmapImageAsync(bytes);
-        ClearRefPhotoButton.IsEnabled = true;
-    }
-
-    private async void AddRefPhotoButton_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new FileOpenPicker();
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
-        picker.FileTypeFilter.Add(".png");
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".bmp");
-
-        var file = await picker.PickSingleFileAsync();
-        if (file is null) return;
-
-        var buffer = await FileIO.ReadBufferAsync(file);
-        _refImageBytes = await Task.Run(() => NormalizeOrientation(buffer.ToArray()));
-        RefPhotoThumbnail.Source = await LoadBitmapImageAsync(_refImageBytes);
-        ClearRefPhotoButton.IsEnabled = true;
-
-        // A result slot and a loaded ref photo are alternate ways to set the img2img
-        // base; loading one here supersedes the other. This only affects what the next
-        // generate builds on — the Preview panel keeps showing whatever result was last
-        // clicked, independent of the ref photo shown in its own panel.
-        if (_selectedIndex >= 0)
-        {
-            Results[_selectedIndex].IsActive = false;
-            _selectedIndex = -1;
-        }
-    }
-
-    private void ClearRefPhotoButton_Click(object sender, RoutedEventArgs e) => ClearRefPhoto();
-
-    private void ClearRefPhoto()
-    {
-        _refImageBytes = null;
-        RefPhotoThumbnail.Source = null;
-        ClearRefPhotoButton.IsEnabled = false;
-    }
-
-    // Phone/camera photos are commonly stored in the sensor's native orientation with an EXIF
-    // Orientation tag telling viewers to rotate them — WinUI's BitmapImage honors that tag when
-    // displaying the thumbnail, but OnnxStack's image loader does not, so the model would
-    // otherwise generate from the unrotated sensor orientation while the preview looks upright.
-    // Baking the rotation into the pixels once here keeps what's displayed and what the model
-    // sees in agreement.
-    private static byte[] NormalizeOrientation(byte[] imageBytes)
-    {
-        // Fully qualified: Microsoft.UI.Xaml.Controls.Image (the XAML control, already in scope
-        // via the using at the top of this file) would otherwise shadow ImageSharp's Image type.
-        using var image = SixLabors.ImageSharp.Image.Load(imageBytes);
-        image.Mutate(ctx => ctx.AutoOrient());
-        using var ms = new MemoryStream();
-        image.SaveAsPng(ms);
-        return ms.ToArray();
-    }
-
     private void ShowPreview(int index)
     {
+        if (_currentPreviewIndex >= 0 && _currentPreviewIndex < Results.Count)
+            Results[_currentPreviewIndex].IsActive = false;
+
         var item = Results[index];
+        item.IsActive = true;
+
         PreviewImage.Source = item.Thumbnail;
         CurrentImageBytes = item.Bytes;
         CurrentRawPrompt = item.RawPrompt;
@@ -501,116 +364,8 @@ public sealed partial class MainWindow : Window
         return string.IsNullOrEmpty(slug) ? "TXT2IMG" : slug;
     }
 
-    // Flat/vector styles (Cartoon, Icon, Cel-Shaded) ask the model to suppress shading/lighting
-    // entirely — a much bigger jump away from its photographic training default than a painterly
-    // style like Watercolor/Oil Painting, which keeps that shading. Negative-prompt wording alone
-    // couldn't fix this (tried and reverted); a guidance-scale bump for just these styles forces
-    // stronger adherence to the style/negative prompt without affecting the styles that already
-    // work reliably.
-    private const float FlatStyleGuidanceMultiplier = 1.6f;
-
-    // Must stay locked on every reference edit — models otherwise substitute a default face/race
-    // when the prompt asks for aging or other big changes (live failure).
-    private const string ReferenceIdentityLock =
-        "same exact person as the reference photo, same race and ethnicity, same skin tone, " +
-        "same facial features, do not change race or skin color";
-
-    private const string ReferenceIdentityNegative =
-        "different person, different race, race change, ethnicity change, whitewashed, " +
-        "pale caucasian skin if reference is dark-skinned, face swap, wrong ethnicity";
-
-    // Reference + style: lead with the style medium (subject-first buries it under the photo).
-    // Ignore vague "convert to cartoon" wording — the Style dropdown already chose the look.
-    private static string BuildReferenceStylePrompt(string prompt, string style)
-    {
-        // Reuse BuildPrompt so style suffixes stay in sync with normal generations.
-        var built = BuildPrompt("the same person as the reference photo", style);
-        var suffixStart = built.Prompt.IndexOf(',');
-        var styleSuffixText = suffixStart >= 0 ? built.Prompt[(suffixStart + 1)..].Trim() : built.Prompt;
-
-        var genericRestyle = string.IsNullOrWhiteSpace(prompt)
-            || Regex.IsMatch(prompt,
-                @"\b(convert|make|turn|change|transform|restyle)\b.*\b(cartoon|comic|anime|drawing|illustration|style)\b",
-                RegexOptions.IgnoreCase);
-
-        var identity = genericRestyle
-            ? $"{ReferenceIdentityLock}, same pose and clothing"
-            : $"{prompt.Trim()}, {ReferenceIdentityLock}, same pose";
-
-        return
-            $"{styleSuffixText}, {identity}, " +
-            $"clear {style} stylization throughout, bold stylized look, " +
-            "not a photograph, not photorealistic, not a lightly filtered photo";
-    }
-
-    // Style=None + reference photo: frame as an edit, and always lock identity/race/skin tone.
-    private static string BuildReferenceEditPrompt(string prompt)
-    {
-        var edit = prompt.Trim();
-        // "age … 30 years" OR "30 years older"
-        var ageMatch = Regex.Match(edit,
-            @"\bage\b.{0,48}?\b(\d+)\s*years?\b|\b(\d+)\s*years?\s+older\b",
-            RegexOptions.IgnoreCase);
-        if (ageMatch.Success)
-        {
-            var yearsText = ageMatch.Groups[1].Success ? ageMatch.Groups[1].Value : ageMatch.Groups[2].Value;
-            if (int.TryParse(yearsText, out var years) && years > 0)
-            {
-                edit =
-                    $"{edit}, aged {years} years while remaining the same person, " +
-                    "older face with wrinkles on the same skin tone, " +
-                    "hair may be greyer but skin color and ethnicity unchanged";
-            }
-        }
-
-        return
-            $"edit the reference photo: {edit}. {ReferenceIdentityLock}. " +
-            "Apply only the requested change — keep race, skin tone, and who they are.";
-    }
-
-    private static (string Prompt, string ExtraNegative, float GuidanceScaleMultiplier) BuildPrompt(string prompt, string style)
-    {
-        // No style suffix, no extra negative terms, no guidance bump — just the user's own
-        // prompt against the model's base negative prompt and default guidance scale.
-        if (style == "None")
-        {
-            return (prompt, "", 1f);
-        }
-
-        // The subject goes first: earlier tokens carry more weight in the text encoder, so
-        // leading with style words buries the actual subject. Photorealistic also steers the
-        // negative prompt away from the model's illustrative default — SDXL (and DreamShaper's
-        // fine-tuning especially) leans painterly/stylized unless told otherwise, so "photo" in
-        // the prompt alone doesn't reliably win on its own.
-        var (styleSuffix, extraNegative, guidanceMultiplier) = style switch
-        {
-            "Icon" => ("flat vector icon, single bold silhouette shape, minimal geometric design, solid limited color palette, logo-like simplicity", "photo, photorealistic, realistic, 3d render, watercolor, oil painting, detailed illustration, gradient shading, cartoon character", FlatStyleGuidanceMultiplier),
-            "Comic Book" => ("comic book illustration, bold ink outlines, halftone dot shading, dynamic pop art coloring, comic panel art style", "photo, photorealistic, realistic, 3d render, watercolor, oil painting", FlatStyleGuidanceMultiplier),
-            // Cel-shading is really a rendering technique (flat, hard-edged toon shading), not
-            // exclusive to anime — Western cartoons and games (Borderlands, Wind Waker) use it
-            // too — so this is kept targeted at that non-anime "toon-shaded game/cartoon" look,
-            // with each style's negative prompt pushing away from the other.
-            "Cel-Shaded" => ("cel-shaded toon render, bold black outlines tracing distinct colored shapes, flat cel shading with clearly visible colored regions, saturated flat colors, stylized toon-shaded video game or cartoon look", "photo, realistic, painterly, 3d render, watercolor, oil painting, anime, manga, japanese animation, black silhouette, solid black shape, underexposed", FlatStyleGuidanceMultiplier),
-            "Anime" => ("anime illustration, manga character design, expressive anime eyes, detailed manga line art, vibrant colors, Japanese animation studio aesthetic", "photo, photorealistic, realistic, 3d render, watercolor, oil painting, cel-shaded, flat toon shading", FlatStyleGuidanceMultiplier),
-            "Watercolor" => ("watercolor painting, soft flowing pigment, visible paper texture, gentle color bleed, delicate brush strokes, fine art", "3d render, photo, vector art, flat colors, cartoon", 1f),
-            // Thick sculpted paint (palette-knife ridges) — distinct from smoother classical Oil Painting.
-            "Impasto" => ("thick impasto oil painting, heavy sculpted paint ridges, palette-knife strokes, chunky visible paint loads, textured paint surface", "3d render, photo, vector art, flat colors, cartoon, smooth digital art, watercolor, airbrushed, soft blended brushwork", FlatStyleGuidanceMultiplier),
-            "Oil Painting" => ("oil painting, rich brush strokes, canvas texture, classical fine art style, painterly, dramatic lighting", "3d render, photo, vector art, flat colors, cartoon, smooth digital art", 1f),
-            // A physical/handcrafted medium like Watercolor or Oil Painting, not a computer
-            // render — grouped with them rather than with 3D Render below.
-            "Claymation" => ("claymation, stop-motion clay animation style, sculpted clay figures, visible fingerprints and tool marks, handcrafted texture", "photo, photorealistic, realistic, flat colors, vector art, watercolor, oil painting, 2d illustration", FlatStyleGuidanceMultiplier),
-            "Fantasy Art" => ("fantasy digital painting, concept art, dramatic cinematic lighting, intricate detail, epic fantasy illustration", "3d render, photo, vector art, flat colors, cartoon, anime", 1f),
-            "Pixel Art" => ("pixel art, retro 8-bit video game sprite, blocky pixelated style, limited color palette", "blurry, smooth gradients, anti-aliased, photo, photorealistic, realistic, 3d render, watercolor, oil painting", FlatStyleGuidanceMultiplier),
-            "3D Render" => ("3d render, Pixar-style character render, smooth CG shading, studio lighting, dimensional depth", "flat colors, vector art, 2d illustration, watercolor, oil painting, sketch", 1f),
-            // Vintage Photo's negative already excludes "digital, modern" to stay away from this
-            // style; this excludes "vintage, sepia, film grain" in return.
-            "Photorealistic" => ("photorealistic, DSLR photograph, natural lighting, sharp focus, highly detailed skin and textures", "cartoon, clipart, illustration, drawing, painting, anime, flat colors, vector art, vintage, sepia, film grain", 1f),
-            "Vintage Photo" => ("vintage photograph, retro film grain, faded sepia tones, old-fashioned analog photo aesthetic, nostalgic lighting", "cartoon, clipart, illustration, drawing, painting, anime, flat colors, vector art, digital, modern", 1f),
-            _ => ("cartoon character illustration, bold clean outlines, bright cheerful colors, playful exaggerated proportions", "photo, photorealistic, realistic, 3d render, flat vector icon", FlatStyleGuidanceMultiplier), // Cartoon
-        };
-
-        return ($"{prompt}, {styleSuffix}", extraNegative, guidanceMultiplier);
-    }
+    private static (string Prompt, string ExtraNegative, float GuidanceScaleMultiplier) BuildPrompt(string prompt, string style) =>
+        StylePromptBuilder.BuildPrompt(prompt, style);
 
     private void StyleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateStyleDescription();
 
@@ -622,18 +377,34 @@ public sealed partial class MainWindow : Window
     // than depend on an upstream fix, the dropdown's ScrollViewer is found once it opens and
     // wheel input is applied to it directly via ChangeView, bypassing whatever automatic routing
     // is broken.
+    private ScrollViewer? _dropdownScrollViewer;
+    private UIElement? _dropdownWheelSource;
+    private ComboBox? _dropdownOwner;
+
     private void ScrollableComboBox_DropDownOpened(object sender, object e)
     {
+        _dropdownOwner = sender as ComboBox;
         var xamlRoot = ((FrameworkElement)sender).XamlRoot;
         foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
         {
-            if (FindDescendant<ScrollViewer>(popup.Child) is not { } scrollViewer)
+            if (popup.Child is not UIElement popupRoot) continue;
+            if (FindDescendant<ScrollViewer>(popupRoot) is not { } scrollViewer)
                 continue;
 
-            // DropDownOpened can fire again for the same still-open popup; avoid stacking
-            // duplicate handlers that would multiply the scroll amount per wheel tick.
-            scrollViewer.PointerWheelChanged -= DropdownScrollViewer_PointerWheelChanged;
-            scrollViewer.PointerWheelChanged += DropdownScrollViewer_PointerWheelChanged;
+            _dropdownScrollViewer = scrollViewer;
+
+            // Subscribing on the ScrollViewer alone wasn't enough: the wheel event is raised on
+            // whichever ComboBoxItem is under the pointer, and the item marks it handled, so a
+            // plain += on an ancestor never sees it. AddHandler with handledEventsToo listens at
+            // the popup root regardless of what already handled the event further down.
+            if (_dropdownWheelSource is { } previous)
+                previous.RemoveHandler(UIElement.PointerWheelChangedEvent, (PointerEventHandler)DropdownWheelChanged);
+
+            popupRoot.AddHandler(
+                UIElement.PointerWheelChangedEvent,
+                (PointerEventHandler)DropdownWheelChanged,
+                handledEventsToo: true);
+            _dropdownWheelSource = popupRoot;
 
             // ComboBox's default behavior scrolls the popup so the *currently selected* item
             // lines up with the closed box, rather than always opening from the top of the list —
@@ -641,16 +412,54 @@ public sealed partial class MainWindow : Window
             // selection could be scrolled anywhere. Forcing it back to the top on every open makes
             // it behave like the shorter Aspect/Model dropdowns, which never scroll to begin with.
             scrollViewer.ChangeView(null, 0, null, true);
+
+            // Scrolling to the top only moves the list *inside* the popup; the popup itself is
+            // still placed to straddle the box (part above it, part below), because ComboBox
+            // positions it to overlay the closed box once the list no longer fits on screen.
+            // Nudging its offset lines the popup's top edge up with the box, so the list always
+            // reads as dropping down from where it was opened. Deferred because the popup hasn't
+            // been laid out yet at DropDownOpened time, so its position can't be measured here.
+            var source = (FrameworkElement)sender;
+            DispatcherQueue.TryEnqueue(() => AlignPopupTopToElement(popup, popupRoot, source));
             break;
         }
     }
 
-    private void DropdownScrollViewer_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    private static void AlignPopupTopToElement(Popup popup, UIElement popupRoot, FrameworkElement anchor)
     {
-        var scrollViewer = (ScrollViewer)sender;
+        if (!popup.IsOpen) return;
+
+        var anchorTop = anchor.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+        var popupTop = popupRoot.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+
+        popup.VerticalOffset += anchorTop - popupTop;
+    }
+
+    // Moves the view only, the same as dragging the scrollbar; the selection is left alone and
+    // still changes on click. Stepping the selection per notch instead (an earlier attempt) read
+    // as nothing happening at all, because the selected row carries no highlight, so the wheel
+    // silently walked rows that were already on screen until the selection fell off an edge.
+    // One notch scrolls exactly one row: the Windows delta is typically ±120 regardless of
+    // item height, so using it raw jumped three-plus styles at once. Animation is off so the
+    // list tracks the wheel 1:1 instead of easing behind a fast flick.
+    private void DropdownWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dropdownScrollViewer is not { } scrollViewer) return;
+        if (_dropdownOwner is not { } comboBox) return;
+
+        var itemCount = comboBox.Items.Count;
+        if (itemCount == 0) return;
+
         var delta = e.GetCurrentPoint(scrollViewer).Properties.MouseWheelDelta;
-        scrollViewer.ChangeView(null, scrollViewer.VerticalOffset - delta, null);
+        if (delta == 0) return;
         e.Handled = true;
+
+        var itemHeight = scrollViewer.ExtentHeight / itemCount;
+        if (itemHeight <= 0) return;
+
+        var step = delta > 0 ? -itemHeight : itemHeight;
+        var offset = Math.Clamp(scrollViewer.VerticalOffset + step, 0, scrollViewer.ScrollableHeight);
+        scrollViewer.ChangeView(null, offset, null, true);
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
@@ -682,20 +491,27 @@ public sealed partial class MainWindow : Window
         var style = (StyleComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "None";
         StyleDescriptionText.Text = style switch
         {
-            "Cartoon" => "Cartoon character — bold outlines, bright cheerful colors",
-            "Icon" => "Flat vector logo/icon — single bold shape, minimal palette",
-            "Comic Book" => "Bold ink outlines, halftone shading, pop art comic style",
-            "Cel-Shaded" => "Toon-shaded game/cartoon look — bold outlines, flat hard-edged shading",
-            "Anime" => "Manga character design, expressive eyes, Japanese animation look",
-            "Watercolor" => "Soft, painterly, visible paper texture",
-            "Impasto" => "Thick textured paint — chunky brush / palette-knife surface",
-            "Oil Painting" => "Rich brush strokes, canvas texture, classical fine art",
-            "Claymation" => "Stop-motion clay animation, handcrafted sculpted texture",
-            "Fantasy Art" => "Painterly concept art, dramatic lighting, epic detail",
-            "Pixel Art" => "Blocky 8-bit game sprite, retro pixelated look",
-            "3D Render" => "Pixar-style CG character render, studio lighting",
-            "Photorealistic" => "Photo-like — DSLR look, sharp focus, detailed skin/textures",
-            "Vintage Photo" => "Retro film photo — faded tones, grain, nostalgic",
+            "Cartoon" => "Cartoon — bold outlines, bright colors, full scene",
+            "Icon" => "Flat vector logo/icon — one centered glyph, minimal palette",
+            "Comic Book" => "Graphic novel comic — bold ink, halftone, dynamic angle",
+            "Anime" => "Manga/cel anime — clean line art, masterpiece quality tags",
+            "Watercolor" => "Wet-on-wet watercolor — paper texture, pastel tones",
+            "Graphic Oil" => "Hard-edged textured oil — blocky palette-knife paint on the subject",
+            "Oil Painting" => "Classical oil — thick brushstrokes, canvas texture, museum",
+            "Soft Oil" => "Soft atmospheric oil — blended light, gentle painterly scene",
+            "Claymation" => "Stop-motion clay — sculpted texture, no stray hands",
+            "Fantasy Art" => "Epic fantasy digital painting — dramatic lighting, mythical mood",
+            "Dark Fantasy" => "Dark medieval fantasy — muted tones, epic mood",
+            "Pixel Art" => "16-bit RPG pixel art — clean hard pixels, limited palette",
+            "3D Render" => "Pixar/Blender CGI — smooth natural studio lighting",
+            "Futuristic" => "Clean sci-fi — chrome, blue-white light, sleek tech (not neon cyberpunk)",
+            "Black & White" => "Sharp monochrome photo — full subject in scene, rich grayscale",
+            "Vintage Photo" => "Yellowed film — grain, scratches, light leaks",
+            "Concept Art" => "ArtStation digital painting — epic composition, cinematic",
+            "Cyberpunk" => "Neon night city — rain, holograms, magenta/cyan dystopia",
+            "Colorful Vector" => "Flat colorful vector — black background, bold saturated colors",
+            "Minimalist" => "Flat vector minimalist — 5 colors, no gradients",
+            "New Impasto" => "Virtuoso-inspired — tube paint, thick layers, light on ridges",
             _ => "No style applied — just your prompt, as the model interprets it by default", // None
         };
     }
@@ -757,38 +573,24 @@ public sealed partial class MainWindow : Window
     private void ResultsCardBorder_SizeChanged(object sender, SizeChangedEventArgs e) =>
         DispatcherQueue.TryEnqueue(UpdateResultSlotsAspect);
 
-    // Reshapes the Ref Photo / Preview boxes to match the selected aspect ratio, clamped to
-    // whatever vertical space the (now fixed-share, see MainWindow.xaml) Preview row actually
-    // has, so the box never overflows the window.
+    // Reshapes the Preview box to match the selected aspect ratio, clamped to the image host.
     private void UpdatePreviewAspect()
     {
         if (AspectComboBox?.SelectedItem is not ComboBoxItem selected) return;
         var (aspectWidth, aspectHeight) = GetAspectRatio(selected.Content?.ToString() ?? "Square");
 
-        var refPhotoHeight = ApplyAspectBox(RefPhotoBorder, RefPhotoColumn.ActualWidth, aspectWidth, aspectHeight);
-        var previewHeight = ApplyAspectBox(PreviewBorder, PreviewImageColumn.ActualWidth, aspectWidth, aspectHeight);
+        var previewHeight = ApplyAspectBox(PreviewBorder, PreviewImageHost.ActualWidth, aspectWidth, aspectHeight);
 
-        // Otherwise fixed at whatever looked right for one box size — barely visible once the
-        // window's maximized, oversized once it's small. Scaling off the same measured height as
-        // the box itself keeps it proportionate at any window size (same idea as the style
-        // description text in UpdateResultSlotsAspect).
-        if (refPhotoHeight > 0) RefPhotoPlaceholderText.FontSize = Math.Clamp(refPhotoHeight * 0.065, 14, 26);
         if (previewHeight > 0) PreviewPlaceholderText.FontSize = Math.Clamp(previewHeight * 0.065, 14, 26);
     }
 
-    // Fits within the column width and the available row height, whichever is the tighter
-    // constraint, so the box never overflows the window; the unconstrained dimension is then
-    // centered within its column.
-    private double ApplyAspectBox(FrameworkElement box, double columnWidth, double aspectWidth, double aspectHeight)
+    // Fits within the host width and height, whichever is tighter.
+    private double ApplyAspectBox(FrameworkElement box, double hostWidth, double aspectWidth, double aspectHeight)
     {
-        // The row's ActualHeight is the space for the whole row, margin included — the box's
-        // own top/bottom margin (14px top, in XAML) has to come out of that budget too, or the
-        // box ends up exactly margin-sized-taller than what's actually left, overflowing the
-        // card by that much every time.
-        var maxHeight = ImageRowDefinition.ActualHeight - box.Margin.Top - box.Margin.Bottom;
-        if (columnWidth <= 0 || maxHeight <= 0) return 0;
+        var maxHeight = PreviewImageHost.ActualHeight - box.Margin.Top - box.Margin.Bottom;
+        if (hostWidth <= 0 || maxHeight <= 0) return 0;
 
-        var height = columnWidth * aspectHeight / aspectWidth;
+        var height = hostWidth * aspectHeight / aspectWidth;
         if (height > maxHeight)
         {
             height = maxHeight;
@@ -805,61 +607,32 @@ public sealed partial class MainWindow : Window
         return height;
     }
 
-    // Sized from the Results card's own fixed-share row (see MainWindow.xaml), independently of
-    // Preview's box — NOT as a fraction of Preview's computed height. That was the original
-    // design, and it created a feedback loop: Results' height depended on Preview's height, but
-    // Preview's available height was in turn whatever the (then content-sized) Results row left
-    // behind, so resizing one retriggered a re-layout of the other and the two settled on a far
-    // too small value. ItemsControl doesn't expose its generated containers directly; each one is
-    // a ContentPresenter wrapping the DataTemplate's root Grid, reached here via VisualTreeHelper
-    // since this WinAppSDK version has no ContentTemplateRoot.
+    // Compact results strip: preferred thumbnail height, then shrink if width can't fit
+    // 5 slots + style description. Independent of Preview height (no layout feedback loop).
     private void UpdateResultSlotsAspect()
     {
         if (AspectComboBox?.SelectedItem is not ComboBoxItem selected) return;
         if (ResultsPanel.ItemsPanelRoot is not StackPanel panel) return;
         var (aspectWidth, aspectHeight) = GetAspectRatio(selected.Content?.ToString() ?? "Square");
 
-        // Caption text + its row + the ItemsControl's top margin + the card's own top/bottom
-        // padding — everything in the card besides the slots themselves.
-        const double chromeHeight = 66;
-        var slotHeightFromRowHeight = ResultsCardBorder.ActualHeight - chromeHeight;
-        if (slotHeightFromRowHeight <= 0) return;
-
-        // The height-only calculation above never checked whether Results.Count slots at that
-        // height — plus the spacer column and the (always-16:9) description box sharing the same
-        // row — actually fit the card's width. For wide aspect ratios (Landscape) this let every
-        // slot grow wider than the window had room for, overflowing the row instead of shrinking
-        // to fit; the description box and credit line, left with whatever the "*" column had
-        // left over, were what visibly vanished off the right edge. Solving for the height that
-        // makes slots + spacer + description box add up to exactly the card's available width
-        // gives a second candidate height; taking whichever of the two is smaller guarantees the
-        // row fits both dimensions at once, the same "tighter constraint wins" idea as
-        // ApplyAspectBox above.
-        // A few px of slack, not an exact fit: solving for the precise width that fills the row
-        // with zero slack left the description box (right-aligned in its column) getting its left
-        // edge — where its accent border lives — clipped off whenever DPI/sub-pixel rounding
-        // pushed the real layout a hair past the theoretical exact value.
+        const double preferredSlotHeight = 96;
         const double widthSafetyMargin = 6;
-        var availableWidth = ResultsCardBorder.ActualWidth - ResultsCardBorder.Padding.Left - ResultsCardBorder.Padding.Right - ResultsSpacerColumn.ActualWidth - widthSafetyMargin;
+        var availableWidth = ResultsCardBorder.ActualWidth
+            - ResultsCardBorder.Padding.Left - ResultsCardBorder.Padding.Right
+            - ResultsSpacerColumn.ActualWidth - widthSafetyMargin;
+        if (availableWidth <= 0) return;
+
         var totalSpacing = panel.Spacing * (Results.Count - 1);
         var widthPerUnitHeight = Results.Count * aspectWidth / aspectHeight + 16.0 / 9.0;
-        var slotHeightFromRowWidth = (availableWidth - totalSpacing) / widthPerUnitHeight;
+        var slotHeightFromWidth = (availableWidth - totalSpacing) / widthPerUnitHeight;
 
-        var slotHeight = Math.Min(slotHeightFromRowHeight, slotHeightFromRowWidth);
+        var slotHeight = Math.Min(preferredSlotHeight, slotHeightFromWidth);
         if (slotHeight <= 0) return;
         var slotWidth = slotHeight * aspectWidth / aspectHeight;
 
-        // The description box is always 16:9 regardless of the Aspect dropdown — this formula
-        // already doesn't depend on aspectWidth/aspectHeight, so it stays fixed across aspect
-        // changes on its own. It's driven by the same measured budget as the slots (not a
-        // hardcoded guess) so it can't overflow the row the way a fixed guess did in Portrait.
         StyleDescriptionBorder.Height = slotHeight;
         StyleDescriptionBorder.Width = slotHeight * 16.0 / 9.0;
-
-        // Otherwise fixed at whatever looked right for one box size — barely filling the box
-        // once the window's maximized, and cramped once it's small. Scaling off the same
-        // measured height as the box itself keeps it proportionate at any window size.
-        StyleDescriptionText.FontSize = Math.Clamp(slotHeight * 0.11, 12, 22);
+        StyleDescriptionText.FontSize = Math.Clamp(slotHeight * 0.11, 10, 16);
 
         foreach (var child in panel.Children)
         {
@@ -933,6 +706,7 @@ public class ResultItem : INotifyPropertyChanged
             _bytes = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Bytes)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasImage)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Hint)));
         }
     }
 
@@ -958,7 +732,10 @@ public class ResultItem : INotifyPropertyChanged
     public Microsoft.UI.Xaml.Media.SolidColorBrush ActiveBrush =>
         new(_isActive ? Microsoft.UI.Colors.MediumPurple : Microsoft.UI.Colors.Transparent);
 
-    public string Hint => _isActive
-        ? "Using as reference photo — tap again to clear"
-        : Bytes is null ? "Nothing generated yet" : "Use as reference photo";
+    public string Hint =>
+        Bytes is null
+            ? "Nothing generated yet"
+            : _isActive
+                ? "Currently previewed"
+                : "Click to preview";
 }
