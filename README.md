@@ -73,9 +73,8 @@ Runs Stable Diffusion XL locally via [OnnxStack](https://github.com/saluteai/Onn
 
 ## What's new in v1.1.1
 
-- **More styles** — **Film Noir**, **Impressionist**, **Pointillism**, **Pop Art**, **Steampunk**, plus the StyleSelectorXL papercraft / geometric set kept from A/B (**Cubist**, **Kirigami**, **Line Art**, **Low Poly**, **Minecraft**, **Origami**, **Paper Quilling**, **Paper Cut Collage**, **Papercut Shadow Box**, **Silhouette**, **Stacked Papercut**, **Tribal**, **Zentangle**, **Ink Wash**). See [Styles](#styles).
+- **More styles** — **Film Noir**, **Impressionist**, **Pointillism**, **Pop Art**, **Steampunk**, plus StyleSelectorXL papercraft / geometric / ink presets (**Cubist**, **Kirigami**, **Line Art**, **Low Poly**, **Minecraft**, **Origami**, **Paper Quilling**, **Paper Cut Collage**, **Papercut Shadow Box**, **Silhouette**, **Stacked Papercut**, **Tribal**, **Zentangle**, **Ink Wash**). See [Styles](#styles).
 - **Style recipe tuning** — subject fences where XL templates drifted (e.g. **Tribal** wallpaper-only outputs; **Low Poly** / **Minecraft** multi-subject clutter).
-- **Dropped trials that did not hold up on DreamShaper Lightning** — Crayon Drawing, Tilt Shift, Graffiti, Stained Glass, Paper Mache, Isometric, Impasto, and other short-lived **New*** experiments.
 - **Style dropdown** — ComboBox wheel-scroll and top-align polish (one style per notch; opens aligned to the control).
 
 ## What's new in v1.1.0
