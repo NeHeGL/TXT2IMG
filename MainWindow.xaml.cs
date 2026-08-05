@@ -511,7 +511,7 @@ public sealed partial class MainWindow : Window
             "Cyberpunk" => "Neon night city — rain, holograms, magenta/cyan dystopia",
             "Colorful Vector" => "Flat colorful vector — black background, bold saturated colors",
             "Minimalist" => "Flat vector minimalist — 5 colors, no gradients",
-            "New Impasto" => "Virtuoso-inspired — tube paint, thick layers, light on ridges",
+            "New Impasto" => "Thick tube-squeezed oil paint — ridges, knife strokes, light on texture",
             _ => "No style applied — just your prompt, as the model interprets it by default", // None
         };
     }

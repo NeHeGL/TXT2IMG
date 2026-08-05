@@ -2,7 +2,7 @@
 
 **2026 Jeff Molofee (NeHe)**
 
-A Windows desktop app (WinUI 3) that generates images from a text prompt entirely on your own PC, then copies the result straight to your clipboard. No account, no API keys, no cloud calls for generation — everything runs locally on your GPU. The only time the app touches the network is the one-time model download on first run; after that your prompts and images never leave the machine.
+A Windows desktop app (WinUI 3) that turns a text prompt into images on your own GPU — with 22 hand-tuned style presets (oil, anime, pixel, cyberpunk, and more), five variations per run, and one-click copy to the clipboard. No account, no API keys; the only network use is the one-time model download.
 
 ---
 
@@ -12,7 +12,7 @@ A Windows desktop app (WinUI 3) that generates images from a text prompt entirel
 
 ## Download
 
-Grab the latest build from the [Releases page](https://github.com/NeHeGL/TXT2IMG/releases) — download `TXT2IMG-vX.Y.Z-windows-x64.zip`, extract anywhere, and run `TXT2IMG.exe`.
+Grab the latest build from the [Releases page](https://github.com/NeHeGL/TXT2IMG/releases) — download `TXT2IMG-v1.1.0-windows-x64.zip` (or newer), extract anywhere, and run `TXT2IMG.exe`.
 
 If you don't already have it (most Windows 11 PCs do, from other WinUI apps), install the [Windows App SDK Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) first — a small, one-time Microsoft redistributable, same idea as a VC++ Redistributable.
 
@@ -22,11 +22,11 @@ If you don't already have it (most Windows 11 PCs do, from other WinUI apps), in
 
 - **Local generation** — prompts and images stay on your PC; the only network use is the one-time model download on first run
 - **DreamShaper XL Lightning only** — one fast, high-quality model (see [Models](#models) for why SDXL Base was dropped)
-- **22 hand-tuned style presets** — alphabetized in the dropdown, each with a live description of what it produces and negative-prompt terms that push it away from its nearest neighbor (see [Styles](#styles)): None, 3D Render, Anime, Black & White, Cartoon, Claymation, Colorful Vector, Comic Book, Concept Art, Cyberpunk, Dark Fantasy, Fantasy Art, Futuristic, Graphic Oil, Icon, Minimalist, New Impasto, Oil Painting, Pixel Art, Soft Oil, Vintage Photo, Watercolor
-- **Aspect ratio picker** — Square, Landscape/Portrait 16:9, Landscape/Portrait 4:3 (defaults to Landscape 16:9); correctly scaled rather than stretching a square canvas
+- **22 hand-tuned style presets** — alphabetized in the dropdown, each with a live description and negative-prompt terms that push it away from its nearest neighbor (see [Styles](#styles)): None, 3D Render, Anime, Black & White, Cartoon, Claymation, Colorful Vector, Comic Book, Concept Art, Cyberpunk, Dark Fantasy, Fantasy Art, Futuristic, Graphic Oil, Icon, Minimalist, New Impasto, Oil Painting, Pixel Art, Soft Oil, Vintage Photo, Watercolor
+- **Aspect ratio picker** — Square, Landscape/Portrait 16:9, Landscape/Portrait 4:3 (defaults to Landscape 16:9); long edge capped at the model’s safe resolution
 - **Max Detail** — optional checkbox that doubles inference steps for cleaner anatomy and detail (slower; does not raise resolution)
 - **Generates 5 variations per prompt** so you can pick the best result in one pass
-- **Copy to clipboard or save as PNG** — save suggests a filename that includes the panel number and style, e.g. `fairy-with-wings-2-icon.png`
+- **Copy to clipboard or save as PNG** — save suggests a filename that includes the panel number and style, e.g. `fairy-with-wings-2-icon.png`; PNGs also embed the prompt and style as metadata
 
 ---
 
@@ -47,12 +47,12 @@ The 22 presets are the heart of this app, and getting them right took the bulk o
 Most of that work was **differentiation**. Left alone, a small distilled model happily collapses neighboring styles into the same image: Oil Painting slides into Graphic Oil's palette-knife slabs, Cartoon and Anime and Comic Book blur together, flat/vector styles quietly render as photos, and half the palette drifts toward the same "red-and-black poster" look. Every style therefore carries negative-prompt terms aimed squarely at its closest neighbor, so the lineup stays visually distinct:
 
 - **Painterly & traditional media** — **Oil Painting** (visible brushwork and canvas texture), **Soft Oil** (its gentler, more blended sibling), **Graphic Oil** (hard-edged palette-knife slabs), **New Impasto** (thick tube-squeezed paint ridges), **Watercolor**, and **Claymation** for sculpted stop-motion clay.
-- **Illustration & comics** — **Cartoon**, **Anime**, **Comic Book** (Ben-Day dots and inked panels), **Concept Art**, **Fantasy Art**, **Dark Fantasy** (dark medieval tone), and **Minimalist**.
+- **Illustration & comics** — **Cartoon**, **Anime**, **Comic Book** (bold ink and halftone), **Concept Art**, **Fantasy Art**, **Dark Fantasy** (dark medieval tone), and **Minimalist**.
 - **Graphic & digital** — **Colorful Vector** (clean flat vector art), **Icon**, **Pixel Art** (locked to genuinely pixelated output, faces included), **3D Render**, **Cyberpunk** (neon dystopia), and **Futuristic** (clean sci-fi chrome, deliberately split from Cyberpunk so the two don't converge).
 - **Photographic** — **Black & White** (grayscale enforced on the pixels, since the model leaks color from prompts alone) and **Vintage Photo**.
 - **None** — no style suffix at all, letting the model interpret your prompt on its own.
 
-Many of the newer recipes started from published prompt guides and were then adapted for DreamShaper XL Lightning (no LoRAs, retuned negatives, adjusted guidance). Full attribution is in [Credits](#credits) — thank you to InsiderLLM, Stable Diffusion Art, and grafmix421's Impasto Virtuoso for the starting points.
+A few of the newer presets started from published prompt guides and were then adapted for DreamShaper XL Lightning (no LoRAs, retuned negatives, adjusted guidance). Full attribution is in [Credits](#credits).
 
 ---
 
@@ -73,23 +73,23 @@ Runs Stable Diffusion XL locally via [OnnxStack](https://github.com/saluteai/Onn
 
 ## What's new in v1.1.0
 
-- **Big style expansion** — the lineup grew to 22 presets, adding **Colorful Vector**, **Cyberpunk**, **Futuristic**, **Graphic Oil**, **Soft Oil**, **Concept Art**, **Minimalist**, and **New Impasto**, alongside heavily retuned recipes for Anime, Oil Painting, Pixel Art, Watercolor, Comic Book, and Fantasy Art. Several recipes were adapted from published prompt guides (see [Credits](#credits)). See [Styles](#styles) for the full breakdown.
-- **Styles alphabetized** in the dropdown, with the selected item no longer given a competing highlight fill (the mouse hover shows what a click will pick).
-- **Black & White** (formerly Hires B&W) now enforces grayscale on the output pixels, since the model leaks color from prompts and lighting alone.
-- **DreamShaper-only** — SDXL Base / model picker removed to cut size; DreamShaper is the sole engine.
+- **Style expansion** — added **Colorful Vector**, **Cyberpunk**, **Futuristic**, **Graphic Oil**, **Soft Oil**, **Concept Art**, **Minimalist**, **New Impasto**, **Dark Fantasy**, **Black & White**, and **None**, for 22 presets total. See [Styles](#styles).
+- **Retuned existing styles** — **Anime**, **Oil Painting**, **Pixel Art**, **Watercolor**, **Comic Book**, and **Fantasy Art** (already in v1.0.0) got stronger recipes and neighbor-fencing negatives. **Dark Fantasy** keeps the older muted fantasy look; **Soft Oil** keeps the gentler former Oil Painting feel; **Graphic Oil** is the hard palette-knife lane.
+- **Styles alphabetized** in the dropdown; the selected item no longer gets a competing highlight fill (hover shows what a click will pick).
+- **Black & White** enforces grayscale on the output pixels, since the model leaks color from prompts and lighting alone.
+- **DreamShaper-only** — SDXL Base / model picker removed; DreamShaper is the sole engine.
 - **Reference photo / img2img removed** — see [Design notes](#design-notes).
-- **Seed readout and "keep this + 4 new" variation button removed** — trimmed to keep the UI focused; generation still batches 5 varied results per prompt.
+- **Photorealistic and Cel-Shaded removed** — Photorealistic overlapped the photo-oriented lanes; Cel-Shaded overlapped Cartoon/Anime and was inconsistent (abstract stripes vs full scenery).
+- **Seed readout and "keep this + 4 new" variation button removed** — generation still batches 5 varied results per prompt.
 - **Max Detail checkbox** — optional 2× step count for quality.
-- **Layout** — single centered Preview (no side-by-side reference panel); defaults to Landscape 16:9; window height tightened so the Preview and action buttons sit without dead space.
-- **Cel-Shaded removed** — too much overlap with Cartoon/Anime and inconsistent results (abstract stripes vs full scenery).
-- **Style uniqueness pass** — every style given negative-prompt terms aimed at its closest neighbor so the lineup stays visually distinct (Oil vs Graphic Oil, Cartoon vs Anime vs Comic, flat/vector vs photo), plus an anti "red-and-black poster" collapse across the board.
-- **Style lineup overhauled** — Illustration, Realistic, and Ultra High-Res were removed (each either overlapped another style too closely or couldn't reliably hit its intended look), replaced and expanded as above.
-- **Fixed occasional GPU hang (`DXGI_ERROR_DEVICE_HUNG`) mid-batch** — a denoising/VAE step at native 1024 resolution could trip Windows' driver watchdog (TDR) on some GPUs. The model's baseline resolution was lowered to 768.
-- **Fixed anatomy artifacts (fused/extra limbs, malformed hands/feet/poses)** — broadened the negative prompt to cover fused limbs and foot/toe deformities, and raised the fast model's inference steps (8 → 12, with a further 50% boost on non-square aspect ratios) to give it more denoising budget to resolve complex poses. This reduces but doesn't fully eliminate the issue on very complex or ambiguous poses — regenerating remains the reliable fallback.
-- **Fixed non-square aspect ratios (Landscape/Portrait) reintroducing anatomy/GPU-hang risk** — dimensions are now computed by capping the long edge at the model's native resolution rather than stretching to match the square default's total pixel area.
-- **Fixed flat/vector styles (Cartoon, Icon) occasionally rendering photorealistic instead of the requested style** — a guidance-scale increase scoped to those styles forces stronger adherence to the requested look.
-- **The Style dropdown scrolls with the mouse wheel** — one style per notch, and the scrollbar can still be dragged as usual. This works around a known WinUI3 bug ([microsoft-ui-xaml#8764](https://github.com/microsoft/microsoft-ui-xaml/issues/8764)) where the framework reports its windows as "inactive," breaking the automatic wheel-to-scroll routing a dropdown normally relies on; wheel input is now applied to the list directly.
-- **Fixed result thumbnails and the style description box overflowing off the right edge on Landscape/Portrait aspect ratios** — result-slot sizing now accounts for available row width, not just height.
+- **Layout** — single centered Preview; defaults to Landscape 16:9; window height tightened so Preview and actions sit without dead space.
+- **Style uniqueness pass** — neighbor-targeted negatives (Oil vs Graphic Oil, Cartoon vs Anime vs Comic, flat/vector vs photo), plus an anti "red-and-black poster" collapse across the board.
+- **Fixed occasional GPU hang (`DXGI_ERROR_DEVICE_HUNG`) mid-batch** — native 1024 could trip Windows' driver watchdog (TDR) on some GPUs; baseline resolution lowered to 768.
+- **Fixed anatomy artifacts (fused/extra limbs, malformed hands/feet/poses)** — broader negatives and more inference steps on the fast model (8 → 12, with a further boost on non-square aspects). Regenerating remains the fallback on very complex poses.
+- **Fixed non-square aspects reintroducing anatomy/GPU-hang risk** — long edge capped at the model's native resolution instead of stretching to match the square pixel area.
+- **Fixed flat/vector styles (Cartoon, Icon) occasionally rendering photorealistic** — scoped guidance-scale increase.
+- **Style dropdown mouse-wheel scrolling** — one style per notch (workaround for [microsoft-ui-xaml#8764](https://github.com/microsoft/microsoft-ui-xaml/issues/8764)).
+- **Fixed result thumbnails / style description overflowing** on Landscape/Portrait — slot sizing uses available row width, not just height.
 
 ---
 
@@ -138,10 +138,9 @@ It targets `net8.0-windows10.0.19041.0` with WinUI 3.
 
 ## Credits
 
-The checkpoint and runtime are covered under [Models](#models). Several of the style presets began as prompt recipes shared by others and were then adapted for DreamShaper XL Lightning (retuned positives/negatives, adjusted guidance and steps, no LoRAs). Sincere thanks to:
+The checkpoint and runtime are covered under [Models](#models). Most styles were built and tuned here. A few newer presets (and some later retunes) used published prompt guides as a starting point, then were adapted for DreamShaper XL Lightning (retuned positives/negatives, adjusted guidance and steps, no LoRAs). Thanks to:
 
-- [InsiderLLM — AI Art Styles & Workflows](https://insiderllm.com/guides/ai-art-styles-workflows-guide/) — starting recipes behind **Anime**, **Oil Painting**, **Concept Art**, **Pixel Art**, **Watercolor**, **Comic Book**, **Fantasy Art**, and **Minimalist**.
+- [InsiderLLM — AI Art Styles & Workflows](https://insiderllm.com/guides/ai-art-styles-workflows-guide/) — starting recipes for the new **Concept Art** and **Minimalist** presets. Prompt language from the same guide also informed later retunes of styles that were already in the app (**Anime**, **Oil Painting**, **Pixel Art**, **Watercolor**, **Comic Book**, **Fantasy Art**).
 - [Stable Diffusion Art — SDXL prompts](https://stable-diffusion-art.com/sdxl-prompts/) — the basis for **Colorful Vector** (effect #11 "Fish," made subject-agnostic) and **Cyberpunk**.
-- [Impasto Virtuoso on Civitai](https://civitai.com/models/463852/impasto-virtuoso) by **grafmix421** — technique language behind **New Impasto**. The LoRA itself is not loaded (the OnnxStack path doesn't support it); only the descriptive prompt vocabulary was adapted.
 
-All recipes were reworked to hit their intended look on this model without LoRAs, and every style was tuned against its neighbors so the lineup stays distinct.
+Everything else in the lineup — including **Cartoon**, **Icon**, **Claymation**, **3D Render**, **Dark Fantasy**, **Futuristic**, **Graphic Oil**, **Soft Oil**, **Black & White**, **Vintage Photo**, and **New Impasto** — is original tuning for this app. All recipes were reworked to hit their intended look on this model without LoRAs, and every style was tuned against its neighbors so the lineup stays distinct.

@@ -585,8 +585,7 @@ public static class StylePromptBuilder
                 "detailed, organic shapes, painterly, watercolor, oil painting",
                 2.0f),
 
-            // Adapted from CivitAI "Impasto Virtuoso" LoRA (grafmix421) — we can't load the LoRA in
-            // OnnxStack; this is the author's technique language + trigger. Keep subject first.
+            // Thick tube-paint / ridge look. Keep subject first — medium-first prompts ate subjects.
             // A "filling the frame" + gallery-negative variant was tried and reverted: it collapsed
             // into split-screen/photo panels and unrelated props instead of painted subjects.
             "New Impasto" => (
