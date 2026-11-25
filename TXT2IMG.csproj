@@ -26,6 +26,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.23.0" />
     <PackageReference Include="OnnxStack.StableDiffusion" Version="0.60.0" />
+    <PackageReference Include="Vortice.DXGI" Version="3.6.2" />
   </ItemGroup>
 
   <!-- dotnet publish does not carry the compiled XAML (*.xbf) build artifacts into its output for

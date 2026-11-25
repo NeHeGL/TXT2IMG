@@ -12,7 +12,7 @@ A Windows desktop app (WinUI 3) that turns a text prompt into images on your own
 
 ## Download
 
-Grab the latest build from the [Releases page](https://github.com/NeHeGL/TXT2IMG/releases) — download `TXT2IMG-v1.1.1-windows-x64.zip` (or newer), extract anywhere, and run `TXT2IMG.exe`.
+Grab the latest build from the [Releases page](https://github.com/NeHeGL/TXT2IMG/releases) — download `TXT2IMG-v1.1.2-windows-x64.zip` (or newer), extract anywhere, and run `TXT2IMG.exe`.
 
 If you don't already have it (most Windows 11 PCs do, from other WinUI apps), install the [Windows App SDK Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) first — a small, one-time Microsoft redistributable, same idea as a VC++ Redistributable.
 
@@ -23,9 +23,12 @@ If you don't already have it (most Windows 11 PCs do, from other WinUI apps), in
 - **Local generation** — prompts and images stay on your PC; the only network use is the one-time model download on first run
 - **DreamShaper XL Lightning only** — one fast, high-quality model (see [Models](#models) for why SDXL Base was dropped)
 - **39 style presets** — alphabetized in the dropdown, each with a live description and neighbor-fencing negatives (see [Styles](#styles)). Mix of hand-tuned DreamShaper recipes and StyleSelectorXL templates adapted for Lightning.
-- **Aspect ratio picker** — Square, Landscape/Portrait 16:9, Landscape/Portrait 4:3 (defaults to Landscape 16:9); long edge capped at the model’s safe resolution
-- **Max Detail** — optional checkbox that doubles inference steps for cleaner anatomy and detail (slower; does not raise resolution)
+- **Aspect ratio picker** — Square, Landscape/Portrait 16:9, Landscape/Portrait 4:3 (defaults to Landscape 16:9)
+- **Resolution** — **768** (fast) or **896** (sharper; GPU max). Large GPUs (≥ ~18 GiB dedicated) use a stronger denoise recipe automatically at **896**.
+- **4K upscale** — optional CPU resize to 3840 px long edge after each image (preview/save/export; img2img **"New Variation"** still uses native GPU resolution)
 - **Generates 5 variations per prompt** so you can pick the best result in one pass
+- **"New Variation" button** — img2img tweak of the selected result (same prompt/layout, new details)
+- **Model download progress** — first-run download fills the **Generate** button with percent; status text cycles yellow notice → green download message → **"New Variation"** hint; downloads resume if interrupted
 - **Copy to clipboard or save as PNG** — save suggests a filename that includes the panel number and style, e.g. `fairy-with-wings-2-icon.png`; PNGs also embed the prompt and style as metadata
 
 ---
@@ -34,8 +37,8 @@ If you don't already have it (most Windows 11 PCs do, from other WinUI apps), in
 
 1. Type a prompt and press Enter (or click **Generate**)
 2. Pick a **Style** and **Aspect Ratio** — the panel next to the results shows a description of the selected style
-3. Optionally enable **Max Detail** when you want more denoising steps
-4. Click any of the 5 results to preview it
+3. Pick **Resolution** (**768** or **896**) and optionally **4K upscale** for export size
+4. Click any of the 5 results to preview it; use **"New Variation"** on a keeper for another take
 5. **Copy to Clipboard** or **Save as PNG**
 
 ---
@@ -66,10 +69,19 @@ Runs Stable Diffusion XL locally via [OnnxStack](https://github.com/saluteai/Onn
 
 ## Design notes
 
-- **The side-by-side reference panel was removed in favor of a single, larger Preview.** The original layout paired the output with a reference-image panel for img2img editing — load a photo, then restyle it to claymation/pixel/watercolor, change eye color, age a face, and so on. That path never worked reliably with DreamShaper Lightning: aging a face barely worked, and most other edits either drifted off the source or failed outright. Rather than ship a half-broken feature, the reference panel, the creativity slider, and the ↻ "use as reference" badge were all removed. Generation is now text + style only, and dropping the reference column freed the whole width for one centered Preview that shows the selected result much larger. The seed readout and the experimental "keep this + 4 new" variation button were later removed for the same reason — they added UI weight without pulling their weight.
-- **Max Detail** only increases inference steps (not resolution). Higher res at 1024 was previously linked to GPU TDR hangs on some machines; the working baseline stays at 768.
+- **Single centered Preview** — the old side-by-side reference/img2img edit panel (load a photo, restyle or age a face, etc.) was removed because it never worked reliably with DreamShaper Lightning. Generation is text + style; the **"New Variation"** button is a separate, targeted img2img path on a finished result.
+- **896** is the safe GPU long-edge cap (1024 repeatedly tripped TDR on DirectML). **4K upscale** is export-only, not extra denoise. Defaults stay safe on ~16 GB VRAM cards; larger cards get a stronger denoise recipe at **896**, not a higher canvas size.
 
 ---
+
+## What's new in v1.1.2
+
+- **Resolution picker** — **768** (fast) or **896** (sharper; GPU max).
+- **Large-GPU denoise** — cards with enough dedicated VRAM automatically use a stronger step/CFG recipe at **896** (same pixel size).
+- **4K upscale** — optional CPU resize to 3840 px long edge after each image for preview/save/clipboard.
+- **Added "New Variation" button** — img2img variation of the selected result (same stored prompt/layout, new details).
+- **Model download progress** — first-run download fills the **Generate** button with percent; status text cycles yellow notice → green download message → **"New Variation"** hint; downloads resume if interrupted.
+- **Blank-image detection** — skips/report empty outputs after generation or variation.
 
 ## What's new in v1.1.1
 
@@ -84,10 +96,9 @@ Runs Stable Diffusion XL locally via [OnnxStack](https://github.com/saluteai/Onn
 - **Styles alphabetized** in the dropdown; the selected item no longer gets a competing highlight fill (hover shows what a click will pick).
 - **Black & White** enforces grayscale on the output pixels, since the model leaks color from prompts and lighting alone.
 - **DreamShaper-only** — SDXL Base / model picker removed; DreamShaper is the sole engine.
-- **Reference photo / img2img removed** — see [Design notes](#design-notes).
+- **Reference photo panel removed** — free-form photo edits were unreliable; see [Design notes](#design-notes). (The **"New Variation"** button in v1.1.2 is a different, result-only path.)
 - **Photorealistic and Cel-Shaded removed** — Photorealistic overlapped the photo-oriented lanes; Cel-Shaded overlapped Cartoon/Anime and was inconsistent.
 - **Seed readout and "keep this + 4 new" variation button removed** — generation still batches 5 varied results per prompt.
-- **Max Detail checkbox** — optional 2× step count for quality.
 - **Layout** — single centered Preview; defaults to Landscape 16:9.
 - **Style uniqueness pass** — neighbor-targeted negatives plus an anti "red-and-black poster" collapse.
 - **Fixed occasional GPU hang (`DXGI_ERROR_DEVICE_HUNG`) mid-batch** — baseline resolution lowered to 768.
@@ -127,8 +138,11 @@ It targets `net8.0-windows10.0.19041.0` with WinUI 3.
 - [Program.cs](Program.cs) / [App.xaml](App.xaml) / [App.xaml.cs](App.xaml.cs) — application entry point and Windows App SDK bootstrap
 - [MainWindow.xaml](MainWindow.xaml) / [MainWindow.xaml.cs](MainWindow.xaml.cs) — main UI and generation flow
 - [StylePromptBuilder.cs](StylePromptBuilder.cs) — style presets, positive/negative prompts, and per-style tuning
-- [LocalImageGenerator.cs](LocalImageGenerator.cs) — OnnxStack pipeline wrapper
+- [LocalImageGenerator.cs](LocalImageGenerator.cs) — OnnxStack pipeline wrapper (txt2img + img2img variation)
 - [ModelDownloader.cs](ModelDownloader.cs) — model catalog and on-demand download
+- [GenerationProfile.cs](GenerationProfile.cs) / [HardwareBudget.cs](HardwareBudget.cs) / [GpuCapabilitiesProbe.cs](GpuCapabilitiesProbe.cs) — resolution tiers and VRAM-safe caps (keeps defaults safe on ~16 GB cards)
+- [ImageUpscale.cs](ImageUpscale.cs) — optional 4K long-edge CPU resize
+- [PngSanity.cs](PngSanity.cs) — blank-image detection and PNG size helpers
 - [ExecutionProviders.cs](ExecutionProviders.cs) — DirectML/CPU execution provider setup
 - [PngGrayscale.cs](PngGrayscale.cs) / [PngTextChunk.cs](PngTextChunk.cs) — B&W pixel enforcement and PNG metadata helpers
 - [CrashLog.cs](CrashLog.cs) — fatal-error logging

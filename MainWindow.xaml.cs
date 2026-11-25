@@ -5,9 +5,12 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
 using Windows.Storage;
 using Windows.System;
+using Windows.UI.Core;
+using Microsoft.UI.Input;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -20,6 +23,9 @@ namespace TXT2IMG;
 public sealed partial class MainWindow : Window
 {
     private readonly IImageGenerator _imageGenerator = new LocalImageGenerator();
+    private bool _modelDownloadActive;
+    private const string FirstRunDownloadMessage =
+        "First run downloads the model (this can take some time).";
 
     // Populated up front (rather than in the constructor body) because the XAML uses
     // x:Bind Results[0..4] directly; those bindings are evaluated during InitializeComponent,
@@ -74,22 +80,112 @@ public sealed partial class MainWindow : Window
         "Zentangle",
     ];
 
+    private readonly GpuCapabilities _gpuCapabilities;
+
     public MainWindow()
     {
         this.InitializeComponent();
         ResultsPanel.ItemsSource = Results;
         StyleComboBox.ItemsSource = StyleNames;
         StyleComboBox.SelectedItem = "None";
-        // Height is tuned so the preview box — locked to the selected aspect ratio and therefore
-        // limited by the card's width, not its height — leaves no vertical slack. Any surplus
-        // becomes empty gaps above and below it, since the box is centered in its row.
+
+        _gpuCapabilities = GpuCapabilitiesProbe.Detect();
+        InitializeResolutionOptions();
+        ToolTipService.SetToolTip(ResolutionComboBox, _gpuCapabilities.SupportsExtendedLightningSteps
+            ? "768 or 896 (long edge). 896 is the GPU cap; up to 44 Lightning steps at 896."
+            : _gpuCapabilities.SupportsHighVramQuality
+                ? "768 or 896 (long edge). 896 is the GPU cap; this GPU uses a stronger denoise recipe at 896."
+                : "768 or 896 (long edge). 896 is the highest safe GPU resolution on this card.");
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1160, 1090));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
 
         UpdateStyleDescription();
+        RootGrid.Loaded += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
+            DispatcherQueue.TryEnqueue(RefreshHeaderSecondLine);
+        };
+        AppWindow.Changed += (_, args) =>
+        {
+            if (args.DidSizeChange)
+                DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
+        };
     }
 
     private string SelectedStyle => StyleComboBox.SelectedItem?.ToString() ?? "None";
+
+    private void RefreshHeaderSecondLine()
+    {
+        if (NewVariationHintText is null || FirstRunDownloadText is null)
+            return;
+        if (_modelDownloadActive)
+            return;
+
+        var present = ModelDownloader.IsModelPresent(ModelCatalog.DreamShaperXLLightning);
+        if (present)
+        {
+            FirstRunDownloadText.Visibility = Visibility.Collapsed;
+            NewVariationHintText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        // Bold yellow — notice that the first Generate will download the model.
+        SetFirstRunWarningStyle();
+        FirstRunDownloadText.Text = FirstRunDownloadMessage;
+        FirstRunDownloadText.Visibility = Visibility.Visible;
+        NewVariationHintText.Visibility = Visibility.Collapsed;
+    }
+
+    // Second line: bold yellow first-run notice → light-green download status → muted "New Variation" hint.
+    // Progress lives on the Generate button fill only — this line is status text.
+    private static string ActiveDownloadMessage =>
+        $"Currently downloading the {ModelCatalog.DreamShaperXLLightning.DisplayName} model.";
+
+    private void BeginHeaderModelDownloadIfNeeded()
+    {
+        if (ModelDownloader.IsModelPresent(ModelCatalog.DreamShaperXLLightning))
+            return;
+
+        _modelDownloadActive = true;
+        NewVariationHintText.Visibility = Visibility.Collapsed;
+        SetDownloadingStyle();
+        FirstRunDownloadText.Text = ActiveDownloadMessage;
+        FirstRunDownloadText.Visibility = Visibility.Visible;
+    }
+
+    private void EndHeaderModelDownload()
+    {
+        _modelDownloadActive = false;
+        RefreshHeaderSecondLine();
+    }
+
+    private void SetFirstRunWarningStyle()
+    {
+        FirstRunDownloadText.FontWeight = Microsoft.UI.Text.FontWeights.Bold;
+        FirstRunDownloadText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 224, 64));
+    }
+
+    private void SetDownloadingStyle()
+    {
+        FirstRunDownloadText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        FirstRunDownloadText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 120, 220, 140));
+    }
+
+    private Progress<double> CreateProgressFillCallback() =>
+        new Progress<double>(SetGenerateButtonFill);
+
+    // Button status goes Downloading → Loading → Generating. As soon as download is done,
+    // flip the second line to the muted "New Variation" hint (don't wait for the batch to finish).
+    private Progress<string> CreateStatusCallback() =>
+        new Progress<string>(status =>
+        {
+            GenerateButton.Content = status;
+            if (_modelDownloadActive
+                && !status.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase))
+            {
+                EndHeaderModelDownload();
+            }
+        });
 
     // Known WinUI3 bug (unpackaged desktop apps in particular): the window is misreported as
     // "inactive," which breaks the automatic mouse-wheel-to-ScrollViewer routing a ComboBox
@@ -179,14 +275,156 @@ public sealed partial class MainWindow : Window
     private void StyleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateStyleDescription();
 
+    private void PromptTextContextFlyout_Opening(object sender, object e)
+    {
+        var hasSelection = PromptTextBox.SelectionLength > 0;
+        PromptCutMenuItem.IsEnabled = hasSelection;
+        PromptCopyMenuItem.IsEnabled = hasSelection;
+        PromptPasteMenuItem.IsEnabled = Clipboard.GetContent().Contains(StandardDataFormats.Text);
+    }
+
+    private void PromptContextCut_Click(object sender, RoutedEventArgs e)
+    {
+        if (PromptTextBox.SelectionLength <= 0) return;
+        var start = PromptTextBox.SelectionStart;
+        var len = PromptTextBox.SelectionLength;
+        var slice = PromptTextBox.Text.Substring(start, len);
+        var data = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
+        data.SetText(slice);
+        Clipboard.SetContent(data);
+        PromptTextBox.Text = PromptTextBox.Text.Remove(start, len);
+        PromptTextBox.SelectionStart = start;
+        PromptTextBox.SelectionLength = 0;
+    }
+
+    private void PromptContextCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (PromptTextBox.SelectionLength <= 0) return;
+        var start = PromptTextBox.SelectionStart;
+        var len = PromptTextBox.SelectionLength;
+        var data = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
+        data.SetText(PromptTextBox.Text.Substring(start, len));
+        Clipboard.SetContent(data);
+    }
+
+    private async void PromptContextPaste_Click(object sender, RoutedEventArgs e)
+    {
+        var content = Clipboard.GetContent();
+        if (!content.Contains(StandardDataFormats.Text)) return;
+
+        var text = await content.GetTextAsync();
+        if (string.IsNullOrEmpty(text)) return;
+
+        var start = Math.Clamp(PromptTextBox.SelectionStart, 0, PromptTextBox.Text.Length);
+        var len = Math.Min(PromptTextBox.SelectionLength, PromptTextBox.Text.Length - start);
+        var current = PromptTextBox.Text;
+        PromptTextBox.Text = current[..start] + text + current[(start + len)..];
+        PromptTextBox.SelectionStart = start + text.Length;
+        PromptTextBox.SelectionLength = 0;
+        DispatcherQueue.TryEnqueue(ScrollPromptBoxForCaret);
+    }
+
+    private void PromptContextSelectAll_Click(object sender, RoutedEventArgs e)
+    {
+        PromptTextBox.SelectionStart = 0;
+        PromptTextBox.SelectionLength = PromptTextBox.Text.Length;
+    }
+
     private void PromptTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key != VirtualKey.Enter) return;
+
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(CoreVirtualKeyStates.Down);
+        if (shift)
+            return;
+
         e.Handled = true;
         _ = GenerateAsync();
     }
 
+    private void PromptTextBox_GotFocus(object sender, RoutedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(ScrollPromptBoxForCaret);
+
+    private void PromptTextBox_SelectionChanged(object sender, RoutedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(ScrollPromptBoxForCaret);
+
+    private void PromptTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(ScrollPromptBoxForCaret);
+
+    private ScrollViewer? GetPromptScrollViewer() =>
+        FindDescendant<ScrollViewer>(PromptTextBox);
+
+    /// <summary>Two-line viewport: when content overflows, keep the tail visible while typing at the end.</summary>
+    private void ScrollPromptBoxForCaret()
+    {
+        try
+        {
+            if (GetPromptScrollViewer() is not ScrollViewer scrollViewer)
+                return;
+
+            if (scrollViewer.ScrollableHeight <= 0)
+                return;
+
+            var textLen = PromptTextBox.Text?.Length ?? 0;
+            var atEnd = PromptTextBox.SelectionStart >= textLen;
+            if (atEnd)
+                scrollViewer.ChangeView(null, scrollViewer.ScrollableHeight, null, true);
+        }
+        catch
+        {
+            // Ignore re-entrant scroll while paste/context menu updates the box.
+        }
+    }
+
+    private static void ScrollPromptBoxToEnd(TextBox box)
+    {
+        if (FindDescendant<ScrollViewer>(box) is not ScrollViewer scrollViewer)
+            return;
+
+        if (scrollViewer.ScrollableHeight > 0)
+            scrollViewer.ChangeView(null, scrollViewer.ScrollableHeight, null, true);
+    }
+
+    private void PromptBox_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (GetPromptScrollViewer() is not ScrollViewer scrollViewer)
+            return;
+
+        var delta = e.GetCurrentPoint(scrollViewer).Properties.MouseWheelDelta;
+        if (delta == 0)
+            return;
+
+        e.Handled = true;
+        var step = delta > 0 ? -20.0 : 20.0;
+        var offset = Math.Clamp(scrollViewer.VerticalOffset + step, 0, scrollViewer.ScrollableHeight);
+        scrollViewer.ChangeView(null, offset, null, true);
+    }
+
     private void GenerateButton_Click(object sender, RoutedEventArgs e) => _ = GenerateAsync();
+
+    private void VaryButton_Click(object sender, RoutedEventArgs e) => _ = VaryAsync();
+
+    private GenerationProfile.QualityTier SelectedQualityTier
+    {
+        get
+        {
+            if (ResolutionComboBox.SelectedItem is ComboBoxItem item)
+                return GenerationProfile.ParseTier(item.Tag, item.Content?.ToString());
+            return GenerationProfile.QualityTier.Fast;
+        }
+    }
+
+    private bool Upscale4K => Upscale4KCheckBox.IsChecked == true;
+
+    private void InitializeResolutionOptions()
+    {
+        ResolutionComboBox.Items.Clear();
+        ResolutionComboBox.Items.Add(new ComboBoxItem { Content = "768", Tag = GenerationProfile.QualityTier.Fast });
+        ResolutionComboBox.Items.Add(new ComboBoxItem { Content = "896", Tag = GenerationProfile.QualityTier.Quality });
+
+        ResolutionComboBox.SelectedIndex = 0;
+    }
 
     private async Task GenerateAsync()
     {
@@ -213,40 +451,12 @@ public sealed partial class MainWindow : Window
         try
         {
             var style = SelectedStyle;
-            var (fullPrompt, extraNegative, guidanceMultiplier) = BuildPrompt(prompt, style);
+            var plan = BuildGenerationPlan(prompt, style);
+            var generationAspect = GetSelectedAspectLabel();
 
-            var model = ModelCatalog.DreamShaperXLLightning;
-            var guidanceScaleOverride = guidanceMultiplier == 1f ? (float?)null : model.GuidanceScale * guidanceMultiplier;
-
-            var aspectChoice = ((ComboBoxItem)AspectComboBox.SelectedItem).Content?.ToString() ?? "Square";
-            var (widthOverride, heightOverride) = ComputeDimensions(model, aspectChoice);
-
-            // Capping the long edge at the model's native resolution (see ComputeDimensions) still
-            // wasn't enough on its own to prevent duplicated/ghosted content on Landscape/Portrait
-            // results. The actual bottleneck is denoising budget, not canvas size: DreamShaper XL
-            // Lightning's LCM pipeline is tuned for resolving its native square shape, and a
-            // non-square canvas leaves it less budget per unit of "unfamiliar layout" to work
-            // with. Giving every non-square aspect 50% more steps buys back that budget; Square
-            // is left untouched since it isn't affected.
-            var inferenceStepsOverride = aspectChoice == "Square" ? (int?)null : (int)Math.Round(model.InferenceSteps * 1.5);
-
-            // Impasto + Graphic Oil: same step boost Impasto used when it landed the liked look.
-            if (style == "Impasto" || style == "Graphic Oil")
-            {
-                var steps = inferenceStepsOverride ?? model.InferenceSteps;
-                inferenceStepsOverride = (int)Math.Round(steps * 1.5);
-            }
-
-            // Max Detail: more denoising steps only (not higher resolution). Doubles whatever
-            // step count we would have used — slower, often cleaner anatomy/detail.
-            if (MaxDetailCheckBox.IsChecked == true)
-            {
-                var steps = inferenceStepsOverride ?? model.InferenceSteps;
-                inferenceStepsOverride = (int)Math.Round(steps * 2.0);
-            }
-
-            var statusCallback = new Progress<string>(status => GenerateButton.Content = status);
-            var progressFillCallback = new Progress<double>(SetGenerateButtonFill);
+            BeginHeaderModelDownloadIfNeeded();
+            var statusCallback = CreateStatusCallback();
+            var progressFillCallback = CreateProgressFillCallback();
 
             // Every generate produces a brand new set of results, replacing whatever was shown
             // before; each image is dropped into its slot as soon as it's ready instead of
@@ -256,6 +466,8 @@ public sealed partial class MainWindow : Window
                 Results[i].IsActive = false;
                 Results[i].Bytes = null;
                 Results[i].Thumbnail = null;
+                Results[i].GenerationFailed = false;
+                Results[i].GenerationAspectLabel = null;
             }
             PreviewImage.Source = null;
             CurrentImageBytes = null;
@@ -273,12 +485,25 @@ public sealed partial class MainWindow : Window
 
                     // Black & White: model still leaks color from prompts/lighting (live: orange water).
                     // Force grayscale on pixels — prompt strip alone is not enough.
+                    if (await PngSanity.IsMostlyBlankAsync(bytes))
+                    {
+                        Results[index].GenerationFailed = true;
+                        return;
+                    }
+
                     if (style == "Black & White")
                         bytes = await PngGrayscale.ConvertAsync(bytes);
 
+                    Results[index].NativeGenerationBytes = bytes;
+                    if (Upscale4K)
+                        bytes = await ImageUpscale.UpscaleTo4KLongEdgeAsync(bytes);
+
+                    Results[index].GenerationFailed = false;
                     Results[index].Bytes = bytes;
                     Results[index].RawPrompt = prompt;
                     Results[index].Style = style;
+                    Results[index].GenerationAspectLabel = generationAspect;
+                    Results[index].UpdateViewStretch(GetSelectedAspectLabel());
                     Results[index].Thumbnail = await LoadBitmapImageAsync(bytes);
 
                     if (!firstImageShown)
@@ -294,10 +519,10 @@ public sealed partial class MainWindow : Window
             });
 
             await _imageGenerator.GenerateImagesAsync(
-                model, fullPrompt, baseImageBytes: null, statusCallback, imageCallback,
-                extraNegative, widthOverride, heightOverride, progressFillCallback,
-                guidanceScaleOverride: guidanceScaleOverride,
-                inferenceStepsOverride: inferenceStepsOverride);
+                plan.Model, plan.FullPrompt, baseImageBytes: null, statusCallback, imageCallback,
+                plan.ExtraNegative, plan.Width, plan.Height, progressFillCallback,
+                guidanceScaleOverride: plan.GuidanceScaleOverride,
+                inferenceStepsOverride: plan.InferenceSteps);
         }
         catch (Exception ex)
         {
@@ -314,16 +539,137 @@ public sealed partial class MainWindow : Window
             GenerateButton.Content = "Generate";
             ResetGenerateButtonBackground();
             SetControlsEnabled(true);
+            EndHeaderModelDownload();
         }
+    }
+
+    private async Task VaryAsync()
+    {
+        if (CurrentImageBytes is null || _currentPreviewIndex < 0)
+        {
+            await ShowMessageAsync("Select a result first, then New Variation.");
+            return;
+        }
+
+        var varyIndex = _currentPreviewIndex;
+        var item = Results[varyIndex];
+        var prompt = item.RawPrompt;
+        var style = item.Style ?? "None";
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            await ShowMessageAsync("This slot has no stored prompt — generate or pick another result.");
+            return;
+        }
+
+        var sourceBytes = item.NativeGenerationBytes ?? CurrentImageBytes;
+
+        GenerateButton.IsEnabled = false;
+        GenerateButton.Opacity = 0.55;
+        PromptTextBox.IsEnabled = false;
+        GenerateButton.Content = "New Variation...";
+        SetControlsEnabled(false);
+
+        try
+        {
+            var aspectChoice = item.GenerationAspectLabel ?? GetSelectedAspectLabel();
+            var plan = BuildGenerationPlan(prompt, style, aspectChoice);
+            var varySteps = GenerationProfile.ComputeVarySteps(plan.InferenceSteps);
+
+            BeginHeaderModelDownloadIfNeeded();
+            var statusCallback = CreateStatusCallback();
+            var progressFillCallback = CreateProgressFillCallback();
+
+            var (srcWidth, srcHeight) = await PngSanity.GetPixelSizeAsync(sourceBytes);
+
+            var images = await _imageGenerator.GenerateImagesAsync(
+                plan.Model, plan.FullPrompt, baseImageBytes: sourceBytes, statusCallback, imageCallback: null,
+                plan.ExtraNegative, srcWidth, srcHeight, progressFillCallback,
+                strength: GenerationProfile.VaryStrength,
+                guidanceScaleOverride: plan.GuidanceScaleOverride,
+                inferenceStepsOverride: varySteps,
+                batchSizeOverride: 1);
+
+            if (images.Count == 0 || images[0] is not { } varied)
+            {
+                await ShowMessageAsync("New Variation did not return an image.");
+                return;
+            }
+
+            if (await PngSanity.IsMostlyBlankAsync(varied))
+            {
+                await ShowMessageAsync("New Variation returned a blank image — try again or lower resolution.");
+                return;
+            }
+
+            if (style == "Black & White")
+                varied = await PngGrayscale.ConvertAsync(varied);
+
+            item.NativeGenerationBytes = varied;
+            if (Upscale4K)
+                varied = await ImageUpscale.UpscaleTo4KLongEdgeAsync(varied);
+
+            item.Bytes = varied;
+            item.RawPrompt = prompt;
+            item.Style = style;
+            item.GenerationFailed = false;
+            item.UpdateViewStretch(GetSelectedAspectLabel());
+            item.Thumbnail = await LoadBitmapImageAsync(varied);
+            ShowPreview(varyIndex);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync($"New Variation failed:\n\n{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            GenerateButton.IsEnabled = true;
+            GenerateButton.Opacity = 1;
+            PromptTextBox.IsEnabled = true;
+            GenerateButton.Content = "Generate";
+            ResetGenerateButtonBackground();
+            SetControlsEnabled(true);
+            EndHeaderModelDownload();
+        }
+    }
+
+    private sealed record GenerationPlan(
+        ModelDefinition Model,
+        string FullPrompt,
+        string ExtraNegative,
+        int Width,
+        int Height,
+        int InferenceSteps,
+        float? GuidanceScaleOverride);
+
+    private GenerationPlan BuildGenerationPlan(string userPrompt, string style, string? aspectChoiceOverride = null)
+    {
+        var aspectChoice = aspectChoiceOverride
+            ?? ((ComboBoxItem)AspectComboBox.SelectedItem).Content?.ToString() ?? "Square";
+        var (fullPrompt, extraNegative, guidanceMultiplier) = BuildPrompt(userPrompt, style);
+
+        var model = ModelCatalog.DreamShaperXLLightning;
+        var tier = GenerationProfile.ResolveEffectiveTier(SelectedQualityTier, _gpuCapabilities.SupportsHighVramQuality);
+        var baseGuidance = GenerationProfile.GetBaseGuidance(model, tier);
+        var guidanceScaleOverride = guidanceMultiplier == 1f ? (float?)null : baseGuidance * guidanceMultiplier;
+        var sampleSize = GenerationProfile.GetSampleSize(model, tier);
+        var (width, height) = ComputeDimensions(sampleSize, aspectChoice);
+
+        var baseSteps = GenerationProfile.GetBaseSteps(model, tier);
+        var inferenceSteps = GenerationProfile.ComputeInferenceSteps(
+            baseSteps, aspectChoice, style, _gpuCapabilities.SupportsExtendedLightningSteps, tier);
+
+        return new GenerationPlan(model, fullPrompt, extraNegative, width, height, inferenceSteps, guidanceScaleOverride);
     }
 
     private void SetControlsEnabled(bool enabled)
     {
         StyleComboBox.IsEnabled = enabled;
         AspectComboBox.IsEnabled = enabled;
-        MaxDetailCheckBox.IsEnabled = enabled;
+        ResolutionComboBox.IsEnabled = enabled;
+        Upscale4KCheckBox.IsEnabled = enabled;
         CopyButton.IsEnabled = enabled;
         SaveButton.IsEnabled = enabled;
+        VaryButton.IsEnabled = enabled && CurrentImageBytes is not null;
     }
 
     // While a model is downloading, the button's own background becomes the progress bar —
@@ -458,15 +804,41 @@ public sealed partial class MainWindow : Window
         var item = Results[index];
         item.IsActive = true;
 
-        PreviewImage.Source = item.Thumbnail;
         CurrentImageBytes = item.Bytes;
         CurrentRawPrompt = item.RawPrompt;
         CurrentStyle = item.Style;
         _currentPreviewIndex = index;
+        VaryButton.IsEnabled = item.Bytes is not null;
         if (!string.IsNullOrEmpty(item.RawPrompt))
         {
             PromptTextBox.Text = item.RawPrompt;
+            PromptTextBox.SelectionStart = item.RawPrompt.Length;
+            DispatcherQueue.TryEnqueue(() => ScrollPromptBoxToEnd(PromptTextBox));
         }
+
+        // Separate BitmapImage from thumbnails — sharing one instance across two Image controls
+        // with different layout slots breaks measure when aspect changes.
+        UpdatePreviewImageStretch();
+        _ = RefreshPreviewImageAsync();
+    }
+
+    private async Task RefreshPreviewImageAsync()
+    {
+        if (_currentPreviewIndex < 0 || _currentPreviewIndex >= Results.Count)
+        {
+            PreviewImage.Source = null;
+            return;
+        }
+
+        var bytes = Results[_currentPreviewIndex].Bytes;
+        if (bytes is null)
+        {
+            PreviewImage.Source = null;
+            return;
+        }
+
+        PreviewImage.Source = await LoadBitmapImageAsync(bytes);
+        UpdatePreviewImageStretch();
     }
 
     // Turns the user's own prompt into a filesystem-safe filename — this is a local text
@@ -520,14 +892,14 @@ public sealed partial class MainWindow : Window
             "Oil Painting" => "Classical oil — thick brushstrokes, canvas texture, museum",
             "Soft Oil" => "Soft atmospheric oil — blended light, gentle painterly scene",
             "Claymation" => "Stop-motion clay — sculpted texture, no stray hands",
-            "Fantasy Art" => "Epic fantasy digital painting — dramatic lighting, mythical mood",
+            "Fantasy Art" => "D&D rulebook style — painted heroic fantasy, RPG handbook art",
             "Dark Fantasy" => "Dark medieval fantasy — muted tones, epic mood",
             "Pixel Art" => "16-bit RPG pixel art — clean hard pixels, limited palette",
             "3D Render" => "Pixar/Blender CGI — smooth natural studio lighting",
             "Futuristic" => "Clean sci-fi — chrome, blue-white light, sleek tech (not neon cyberpunk)",
             "Black & White" => "Sharp monochrome photo — full subject in scene, rich grayscale",
             "Vintage Photo" => "Yellowed film — grain, scratches, light leaks",
-            "Concept Art" => "ArtStation digital painting — epic composition, cinematic",
+            "Concept Art" => "Film/game concept keyframe — cinematic digital painting, not comic",
             "Cyberpunk" => "Neon night city — rain, holograms, magenta/cyan dystopia",
             "Colorful Vector" => "Flat colorful vector — black background, bold saturated colors",
             "Minimalist" => "Flat vector minimalist — 5 colors, no gradients",
@@ -552,6 +924,8 @@ public sealed partial class MainWindow : Window
             "Zentangle" => "Zentangle — intricate monochrome meditative patterns",
             _ => "No style applied — just your prompt, as the model interprets it by default", // None
         };
+
+        DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
     }
 
     // Reshaping to the same total area as the native square (the previous approach) stretches the
@@ -562,28 +936,26 @@ public sealed partial class MainWindow : Window
     // long edge at SampleSize and scaling the short edge down from there keeps every aspect ratio
     // within the same tested-safe resolution as the square default, trading a smaller total image
     // area on non-square aspects for reliably correct anatomy.
-    private static (int Width, int Height) ComputeDimensions(ModelDefinition model, string aspect)
+    private static (int Width, int Height) ComputeDimensions(int sampleSize, string aspect)
     {
         var (aspectWidth, aspectHeight) = GetAspectRatio(aspect);
 
         double width, height;
         if (aspectWidth >= aspectHeight)
         {
-            width = model.SampleSize;
-            height = model.SampleSize * aspectHeight / aspectWidth;
+            width = sampleSize;
+            height = sampleSize * aspectHeight / aspectWidth;
         }
         else
         {
-            height = model.SampleSize;
-            width = model.SampleSize * aspectWidth / aspectHeight;
+            height = sampleSize;
+            width = sampleSize * aspectWidth / aspectHeight;
         }
 
         return (RoundToMultipleOf64(width), RoundToMultipleOf64(height));
     }
 
-    // SDXL's VAE downsamples by a factor of 8; rounding to a multiple of 64 (rather than just 8)
-    // keeps every internal U-Net feature map size even, avoiding the seam artifacts that odd
-    // intermediate sizes can produce.
+    // SDXL / OnnxStack require multiples of 64 on both axes (432-high 16:9 is invalid → use 448).
     private static int RoundToMultipleOf64(double value) => Math.Max(64, (int)Math.Round(value / 64.0) * 64);
 
     private static (double Width, double Height) GetAspectRatio(string aspect) => aspect switch
@@ -595,21 +967,90 @@ public sealed partial class MainWindow : Window
         _ => (1.0, 1.0),
     };
 
+    private int _aspectLayoutPass;
+
     // Deferred to the next dispatcher tick rather than run inline: mutating Width/Height
     // synchronously from inside SizeChanged re-enters the native layout pass and can crash
     // WinUI's layout engine outright (observed as an access violation in Microsoft.UI.Xaml.dll,
     // not a catchable .NET exception) instead of just misbehaving.
+    private static string GetSelectedAspectLabel(ComboBox aspectCombo) =>
+        ((ComboBoxItem?)aspectCombo.SelectedItem)?.Content?.ToString() ?? "Square";
+
+    private string GetSelectedAspectLabel() => GetSelectedAspectLabel(AspectComboBox);
+
     private void AspectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(UpdatePreviewAspect);
-        DispatcherQueue.TryEnqueue(UpdateResultSlotsAspect);
+        _aspectLayoutPass = 0;
+        var previewIndex = _currentPreviewIndex;
+        DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            RefreshAspectDependentLayout();
+            ApplyViewStretchToAllSlots();
+            if (previewIndex >= 0 && previewIndex < Results.Count && Results[previewIndex].Bytes is not null)
+            {
+                _currentPreviewIndex = previewIndex;
+                _ = RefreshPreviewImageAsync();
+            }
+        });
     }
 
+    private void ApplyViewStretchToAllSlots()
+    {
+        var viewAspect = GetSelectedAspectLabel();
+        foreach (var item in Results)
+            item.UpdateViewStretch(viewAspect);
+        UpdatePreviewImageStretch();
+    }
+
+    private void UpdatePreviewImageStretch()
+    {
+        if (_currentPreviewIndex < 0 || _currentPreviewIndex >= Results.Count)
+        {
+            PreviewImage.Stretch = Stretch.Uniform;
+            return;
+        }
+
+        var item = Results[_currentPreviewIndex];
+        var viewAspect = GetSelectedAspectLabel();
+        PreviewImage.Stretch = ShouldLetterboxView(item, viewAspect)
+            ? Stretch.Uniform
+            : Stretch.UniformToFill;
+    }
+
+    // Letterbox only when we know the PNG was generated at a different aspect than the view dropdown.
+    private static bool ShouldLetterboxView(ResultItem item, string viewAspect) =>
+        item.GenerationAspectLabel is { } generated
+        && !string.Equals(generated, viewAspect, StringComparison.Ordinal);
+
+    private void RootGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
+
     private void PreviewCardGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
-        DispatcherQueue.TryEnqueue(UpdatePreviewAspect);
+        DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
 
     private void ResultsCardBorder_SizeChanged(object sender, SizeChangedEventArgs e) =>
         DispatcherQueue.TryEnqueue(UpdateResultSlotsAspect);
+
+    private void RefreshAspectDependentLayout()
+    {
+        UpdatePreviewAspect();
+        UpdateResultSlotsAspect();
+
+        var hostsReady = PreviewImageHost.ActualWidth > 0 && PreviewImageHost.ActualHeight > 0
+                         && ResultsCardBorder.ActualWidth > 0;
+        if (!hostsReady && _aspectLayoutPass < 6)
+        {
+            _aspectLayoutPass++;
+            DispatcherQueue.TryEnqueue(RefreshAspectDependentLayout);
+        }
+        else
+        {
+            _aspectLayoutPass = 0;
+            if (_currentPreviewIndex >= 0 && Results[_currentPreviewIndex].Bytes is not null)
+                _ = RefreshPreviewImageAsync();
+        }
+    }
 
     // Reshapes the Preview box to match the selected aspect ratio, clamped to the image host.
     private void UpdatePreviewAspect()
@@ -618,15 +1059,50 @@ public sealed partial class MainWindow : Window
         var (aspectWidth, aspectHeight) = GetAspectRatio(selected.Content?.ToString() ?? "Square");
 
         var previewHeight = ApplyAspectBox(PreviewBorder, PreviewImageHost.ActualWidth, aspectWidth, aspectHeight);
-
-        if (previewHeight > 0) PreviewPlaceholderText.FontSize = Math.Clamp(previewHeight * 0.065, 14, 26);
+        UpdatePreviewPlaceholderTypography(previewHeight, aspectWidth, aspectHeight);
     }
 
-    // Fits within the host width and height, whichever is tighter.
+    private void UpdatePreviewPlaceholderTypography(double previewHeight, double aspectWidth, double aspectHeight)
+    {
+        if (PreviewPlaceholderText is null || previewHeight <= 0) return;
+
+        var previewWidth = PreviewBorder.ActualWidth;
+        if (previewWidth <= 0 || double.IsNaN(previewWidth))
+            previewWidth = previewHeight * aspectWidth / aspectHeight;
+
+        PreviewPlaceholderText.MaxWidth = Math.Max(40, previewWidth - 20);
+        var minDim = Math.Min(previewWidth, previewHeight);
+        PreviewPlaceholderText.FontSize = Math.Clamp(minDim * 0.085, 9, 18);
+    }
+
+    private double GetPreviewHostMaxHeight(FrameworkElement box)
+    {
+        var fromHost = PreviewImageHost.ActualHeight - box.Margin.Top - box.Margin.Bottom;
+        if (fromHost > 1) return fromHost;
+
+        if (PreviewCardGrid.ActualHeight <= 0) return 0;
+        const double chromeRows = 26 + 8 + 10 + 40 + 10;
+        return Math.Max(0, PreviewCardGrid.ActualHeight - chromeRows);
+    }
+
+    // Fits within the host width and height, whichever is tighter (matches published — button row stays put).
     private double ApplyAspectBox(FrameworkElement box, double hostWidth, double aspectWidth, double aspectHeight)
     {
-        var maxHeight = PreviewImageHost.ActualHeight - box.Margin.Top - box.Margin.Bottom;
+        var maxHeight = GetPreviewHostMaxHeight(box);
         if (hostWidth <= 0 || maxHeight <= 0) return 0;
+
+        if (aspectHeight > aspectWidth)
+        {
+            var tallHeight = maxHeight;
+            var tallWidth = tallHeight * aspectWidth / aspectHeight;
+            if (tallWidth <= hostWidth + 0.5)
+            {
+                box.Width = tallWidth;
+                box.Height = tallHeight;
+                box.HorizontalAlignment = HorizontalAlignment.Center;
+                return tallHeight;
+            }
+        }
 
         var height = hostWidth * aspectHeight / aspectWidth;
         if (height > maxHeight)
@@ -661,6 +1137,7 @@ public sealed partial class MainWindow : Window
         if (availableWidth <= 0) return;
 
         var totalSpacing = panel.Spacing * (Results.Count - 1);
+        // Match published: thumbs follow aspect; style panel stays landscape 16:9 (balances portrait rows).
         var widthPerUnitHeight = Results.Count * aspectWidth / aspectHeight + 16.0 / 9.0;
         var slotHeightFromWidth = (availableWidth - totalSpacing) / widthPerUnitHeight;
 
@@ -668,20 +1145,14 @@ public sealed partial class MainWindow : Window
         if (slotHeight <= 0) return;
         var slotWidth = slotHeight * aspectWidth / aspectHeight;
 
+        panel.Spacing = 10;
+
         StyleDescriptionBorder.Height = slotHeight;
         StyleDescriptionBorder.Width = slotHeight * 16.0 / 9.0;
         StyleDescriptionText.FontSize = Math.Clamp(slotHeight * 0.11, 10, 16);
+        StyleDescriptionText.MaxWidth = Math.Max(80, StyleDescriptionBorder.Width - 16);
 
-        foreach (var child in panel.Children)
-        {
-            if (child is ContentPresenter presenter
-                && VisualTreeHelper.GetChildrenCount(presenter) > 0
-                && VisualTreeHelper.GetChild(presenter, 0) is FrameworkElement root)
-            {
-                root.Width = slotWidth;
-                root.Height = slotHeight;
-            }
-        }
+        ResultItem.ApplySlotLayout(slotWidth, slotHeight);
     }
 
     private async Task<BitmapImage> LoadBitmapImageAsync(byte[] imageBytes)
@@ -724,6 +1195,63 @@ public class ResultItem : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    private static double _slotLayoutWidth = 96;
+    private static double _slotLayoutHeight = 96;
+
+    static ResultItem()
+    {
+        SlotLayoutChanged += static () =>
+        {
+            foreach (var listener in SlotLayoutListeners)
+                listener.OnSlotLayoutChanged();
+        };
+    }
+
+    private static readonly List<ResultItem> SlotLayoutListeners = [];
+
+    private static event Action? SlotLayoutChanged;
+
+    public static void ApplySlotLayout(double width, double height)
+    {
+        if (width <= 0 || height <= 0) return;
+        var sizeChanged = Math.Abs(_slotLayoutWidth - width) >= 0.5 || Math.Abs(_slotLayoutHeight - height) >= 0.5;
+        _slotLayoutWidth = width;
+        _slotLayoutHeight = height;
+        if (sizeChanged)
+            SlotLayoutChanged?.Invoke();
+        else
+        {
+            foreach (var listener in SlotLayoutListeners)
+                listener.RefreshThumbnailRender();
+        }
+    }
+
+    public ResultItem()
+    {
+        lock (SlotLayoutListeners)
+            SlotLayoutListeners.Add(this);
+    }
+
+    public double SlotWidth => _slotLayoutWidth;
+    public double SlotHeight => _slotLayoutHeight;
+
+    private void OnSlotLayoutChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SlotWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SlotHeight)));
+        RefreshThumbnailRender();
+    }
+
+    private void RefreshThumbnailRender()
+    {
+        if (_thumbnail is null) return;
+        var saved = _thumbnail;
+        _thumbnail = null;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
+        _thumbnail = saved;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
+    }
+
     private BitmapImage? _thumbnail;
     public BitmapImage? Thumbnail
     {
@@ -734,6 +1262,9 @@ public class ResultItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
         }
     }
+
+    /// <summary>Diffusion resolution (img2img source for New Variation).</summary>
+    public byte[]? NativeGenerationBytes { get; set; }
 
     private byte[]? _bytes;
     public byte[]? Bytes
@@ -751,6 +1282,29 @@ public class ResultItem : INotifyPropertyChanged
     public string? RawPrompt { get; set; }
     public string? Style { get; set; }
 
+    /// <summary>Aspect dropdown value when this PNG was generated.</summary>
+    public string? GenerationAspectLabel { get; set; }
+
+    private Stretch _slotImageStretch = Stretch.Uniform;
+    public Stretch SlotImageStretch
+    {
+        get => _slotImageStretch;
+        private set
+        {
+            if (_slotImageStretch == value) return;
+            _slotImageStretch = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SlotImageStretch)));
+        }
+    }
+
+    public void UpdateViewStretch(string viewAspectLabel)
+    {
+        var letterbox = GenerationAspectLabel is { } generated
+                        && !string.Equals(generated, viewAspectLabel, StringComparison.Ordinal);
+        SlotImageStretch = letterbox ? Stretch.Uniform : Stretch.UniformToFill;
+        RefreshThumbnailRender();
+    }
+
     private bool _isActive;
     public bool IsActive
     {
@@ -767,11 +1321,34 @@ public class ResultItem : INotifyPropertyChanged
 
     public bool HasImage => Bytes is not null;
 
+    private bool _generationFailed;
+    public bool GenerationFailed
+    {
+        get => _generationFailed;
+        set
+        {
+            if (_generationFailed == value) return;
+            _generationFailed = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GenerationFailed)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SlotMark)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SlotMarkBrush)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Hint)));
+        }
+    }
+
+    public string SlotMark => GenerationFailed ? "×" : "+";
+
+    public Microsoft.UI.Xaml.Media.SolidColorBrush SlotMarkBrush =>
+        new(GenerationFailed
+            ? Windows.UI.Color.FromArgb(255, 220, 90, 90)
+            : Windows.UI.Color.FromArgb(255, 106, 106, 106));
+
     public Microsoft.UI.Xaml.Media.SolidColorBrush ActiveBrush =>
         new(_isActive ? Microsoft.UI.Colors.MediumPurple : Microsoft.UI.Colors.Transparent);
 
-    public string Hint =>
-        Bytes is null
+    public string Hint => GenerationFailed
+        ? "Blank GPU output — try 768 or lower load (fewer concurrent apps)"
+        : Bytes is null
             ? "Nothing generated yet"
             : _isActive
                 ? "Currently previewed"

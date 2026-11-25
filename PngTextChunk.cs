@@ -73,4 +73,35 @@ public static class PngTextChunk
         }
         return table;
     }
+
+    /// <summary>Reads tEXt chunks (e.g. TXT2IMG Prompt / TXT2IMG Style from Save).</summary>
+    public static IReadOnlyDictionary<string, string> ReadTextChunks(byte[] pngBytes)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (pngBytes.Length < 12) return result;
+
+        var i = 8;
+        while (i + 12 <= pngBytes.Length)
+        {
+            var length = BinaryPrimitives.ReadInt32BigEndian(pngBytes.AsSpan(i));
+            if (length < 0 || i + 12 + length > pngBytes.Length) break;
+
+            var type = Encoding.ASCII.GetString(pngBytes, i + 4, 4);
+            if (type == "tEXt" && length > 0)
+            {
+                var payload = pngBytes.AsSpan(i + 8, length);
+                var zero = payload.IndexOf((byte)0);
+                if (zero > 0 && zero + 1 < payload.Length)
+                {
+                    var key = Encoding.Latin1.GetString(payload[..zero]);
+                    var value = Encoding.Latin1.GetString(payload[(zero + 1)..]);
+                    result[key] = value;
+                }
+            }
+
+            i += 12 + length;
+        }
+
+        return result;
+    }
 }

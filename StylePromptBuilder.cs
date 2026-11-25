@@ -5,7 +5,7 @@ namespace TXT2IMG;
 // Shared style/subject prompt assembly — used by the app and headless matrix tests.
 public static class StylePromptBuilder
 {
-    // Flat/vector styles (Cartoon, Icon, Cel-Shaded) ask the model to suppress shading/lighting
+    // Flat/vector styles (Cartoon, Icon) ask the model to suppress shading/lighting
     // entirely — a much bigger jump away from its photographic training default than a painterly
     // style like Watercolor/Oil Painting, which keeps that shading. Negative-prompt wording alone
     // couldn't fix this (tried and reverted); a guidance-scale bump for just these styles forces
@@ -13,297 +13,15 @@ public static class StylePromptBuilder
     // work reliably.
     public const float FlatStyleGuidanceMultiplier = 1.6f;
 
-    // Impasto: SDXL texture words help bumps, but medium-first + "palette knife" → tool macros,
-    // no boat (live). Subject first; "palette-knife ridges" not the tool; hard-neg art tools.
-    public const float ImpastoGuidanceMultiplier = 1.8f;
-
-    // Live: current Impasto prompt+CFG was landing the flat hard-shadow look the user wants —
-    // that recipe now belongs to Graphic Oil (swap).
+    // Graphic Oil CFG bump — keeps the flat hard-shadow oil look vs DreamShaper's painterly default.
     public const float GraphicPosterGuidanceMultiplier = 1.7f;
-
-    // Photorealistic: DreamShaper leans painterly — need CFG bump + hard anti-paint negatives
-    // (live Impasto lottery: sunset sailboat photos the user wants as a dedicated style).
-    public const float PhotorealisticGuidanceMultiplier = 1.8f;
-
-    // Kept for experiments; Comic currently uses FlatStyleGuidanceMultiplier again.
-    public const float ComicGuidanceMultiplier = 2.0f;
-
-    // Cartoon: same seed-drift problem — one panel flips to flat vector/icon (live: GPS-pin flag).
-    public const float CartoonGuidanceMultiplier = 2.0f;
-
-    // Subject lock for reference + style restyles. Do NOT say "person"/"face"/"gender" here —
-    // that invents people when the reference is a boat/object (live Icon: boat → people).
-    // Person-specific identity stays in BuildReferenceEditPrompt (Style=None) only.
-    public const string ReferenceSubjectLock =
-        "same subject as the reference photo, keep the same object or figure from the reference";
-
-    public const string ReferenceSubjectNegative =
-        "different subject, unrelated object, random people, invented person, face swap, wrong subject";
-
-    // Style=None person edits only — do NOT use these on style restyles of objects.
-    public const string ReferenceIdentityLock =
-        "same person as the reference photo, same face, same gender, same skin tone, same hair";
-
-    public const string ReferenceIdentityNegative =
-        "different person, different face, face swap, gender change, sex change, " +
-        "male to female, female to male, wrong skin tone, unrelated stranger";
-
-    // These three need a harder medium lock on reference restyles (live failures).
-    public static readonly HashSet<string> SoftPaintStyles = new(StringComparer.Ordinal)
-    {
-        "Watercolor", "Impasto", "Oil Painting", "Soft Oil",
-    };
-
-    // Extreme simplification — photo detail sticks hard (live Icon: photoreal portrait, not a
-    // computer icon). Pixel Art has the same failure mode.
-    public static readonly HashSet<string> FlatSimplifyStyles = new(StringComparer.Ordinal)
-    {
-        "Cubist", "Icon", "Kirigami", "Line Art", "Pixel Art",
-        "Low Poly", "Minecraft", "Origami",
-        "Paper Cut Collage", "Paper Quilling", "Papercut Shadow Box", "Silhouette",
-        "Stacked Papercut",
-        "Tribal", "Zentangle",
-    };
-
-    // Ink/graphic styles also lose to the photo on reference restyles (live Comic Book + Cartoon:
-    // photoreal stranger, no ink/halftone).
-    public static readonly HashSet<string> GraphicInkStyles = new(StringComparer.Ordinal)
-    {
-        "Anime", "Cartoon", "Cel-Shaded", "Comic Book", "Ink Wash", "Line Art",
-        "Silhouette",
-    };
-
-    // Medium locks are subject-agnostic — never assume person/face.
-    public static string PaintMediumLock(string style) => style switch
-    {
-        "Watercolor" =>
-            "wet-on-wet watercolor painting of the subject, soft edges, paint bleeds into white paper, " +
-            "visible paper texture, delicate brushwork, pastel tones — soft painterly watercolor throughout",
-        "Impasto" =>
-            "impasto painting of the subject in thick oil paint with visible brush strokes and raised paint ridges, " +
-            "palette-knife ridged texture on the subject, highly textured canvas, raking light on the paint",
-        "Graphic Oil" =>
-            "thick textured oil painting of the subject on canvas, visible palette-knife and brush texture, " +
-            "rich wet oil paint with painterly depth, clear recognizable subject, fine-art oil painting atmosphere",
-        "Soft Oil" =>
-            "soft atmospheric oil painting of the subject on canvas, smooth blended brushwork, " +
-            "luminous painterly atmosphere — soft oil of that same subject, not a museum stranger",
-        "Oil Painting" =>
-            "oil painting of the subject, oil on canvas, thick impasto brushstrokes, visible canvas texture — " +
-            "painterly oil of that same subject, not a museum stranger",
-        _ => "",
-    };
-
-    public static string PaintMediumNegative(string style) => style switch
-    {
-        "Watercolor" =>
-            "bold black outlines, thick ink lines, comic ink, pop art, vector flat colors, graphic poster, " +
-            "high contrast blocks, collage, multi-panel, makeup palette, swatches, photoreal, DSLR, " +
-            "paintbrushes in frame, art tools on the painting, physical brushes",
-        "Impasto" =>
-            "flat paint, smooth, airbrushed, low texture, plastic, " +
-            "palette knife in frame, painting knife, paintbrush, paintbrushes, paint jar, art supplies, " +
-            "macro of paint only, no subject, missing subject, split screen, diptych, photograph, DSLR",
-        "Graphic Oil" =>
-            "photo, photorealistic, realistic, CGI, vector art, cartoon, smooth digital art, " +
-            "watercolor, airbrushed, cel shading, comic outlines, comic book, bold black outlines, " +
-            "thin paint, flat digital painting, paint tube, easel, abstract paint study, color swatches, " +
-            "abstract only, no subject, ray tracing, extreme close-up interior, boat interior POV, " +
-            "ornate gold frame, picture frame, museum frame in image, travel poster, typography, text",
-        "Soft Oil" =>
-            "photograph, DSLR, ornate gold frame, oval portrait frame, museum stranger, " +
-            "classical aristocrat, formal tuxedo, unrelated subject, comic outlines, flat vector, " +
-            "thick impasto, heavy texture, chunky brushstrokes",
-        "Oil Painting" =>
-            "photograph, DSLR, ornate gold frame, oval portrait frame, museum stranger, " +
-            "classical aristocrat, formal tuxedo, unrelated subject, comic outlines, flat vector, " +
-            "smooth digital art, airbrushed, photo",
-        _ => "",
-    };
-
-    public static string SimplifyMediumLock(string style) => style switch
-    {
-        "Icon" =>
-            "exactly one flat vector icon of the subject, single bold silhouette centered in frame, " +
-            "minimal geometric design, solid limited color palette, logo-like simplicity, one icon only",
-        "Pixel Art" =>
-            "the entire image is clean 16-bit RPG pixel art of the subject alone, " +
-            "hard pixel edges covering the whole frame, limited color palette, " +
-            "retro pixel sprite — not a photograph with small pixel stickers",
-        _ => "",
-    };
-
-    public static string SimplifyMediumNegative(string style) => style switch
-    {
-        "Icon" =>
-            "photograph, photorealistic, detailed realism, complex photo background, depth of field, " +
-            "soft lighting, cinematic scene, detailed illustration, painterly, gradient shading, 3d render, " +
-            "storybook, sailboat montage, neon shards, fantasy lighting, cartoon character, " +
-            "two icons, dual icon, split screen, side by side, diptych, collage, multi-panel, mirrored duplicate, " +
-            "circular badge, emblem frame, metallic ring, complex badge",
-        "Pixel Art" =>
-            "photograph, photorealistic, DSLR, high resolution, smooth gradients, anti-aliased, " +
-            "cinematic photo, tiny sprite sticker, floating pixel icon, " +
-            "photo with pixel art badge, painterly, 3d render, " +
-            "game console, handheld console, controller, cartridge, CRT television",
-        _ => "",
-    };
-
-    public static string InkMediumLock(string style) => style switch
-    {
-        "Comic Book" =>
-            "comic book art of the subject, graphic novel illustration, bold ink outlines, " +
-            "dramatic shadows, Ben-Day halftone dots, dynamic angle — not a photograph",
-        "Cartoon" =>
-            "cartoon illustration of the subject, bold clean outlines, bright cheerful colors, " +
-            "full cartoon scene with sky and background, playful exaggerated proportions — not a photo",
-        "Cel-Shaded" =>
-            "cel-shaded toon render of the subject, bold black outlines, flat color regions, " +
-            "hard cel shading — stylized toon, not photoreal",
-        "Anime" =>
-            "anime illustration of the subject, manga line art, vibrant flat colors — " +
-            "Japanese animation still of that subject, not a photograph",
-        _ => "",
-    };
-
-    public static string InkMediumNegative(string style) => style switch
-    {
-        "Comic Book" =>
-            "photograph, photorealistic, DSLR, cinematic photo, " +
-            "text, letters, speech bubble, dialogue balloon, caption, typography, " +
-            "silhouette poster, woodblock print",
-        "Cartoon" =>
-            "photograph, photorealistic, DSLR, realistic, 3d render, flat vector icon, " +
-            "empty white background, plain white void, isolated on white, sticker art, " +
-            "abstract geometric shapes, cubist, fragmented polygons",
-        "Cel-Shaded" =>
-            "photograph, photorealistic, painterly, soft gradients",
-        "Anime" =>
-            "photograph, photorealistic, DSLR, western cartoon, cel-shaded game",
-        _ => "",
-    };
-
-    // Kept for documentation / negatives. Reference Fantasy Art and Dark Fantasy use
-    // BuildPrompt()'s style language — do not invent a second prompt pile per style.
-    public const string FantasyMediumLock =
-        "dark fantasy oil illustration of the single subject from the reference, " +
-        "medieval epic atmosphere, muted earth and twilight colors, dramatic chiaroscuro — " +
-        "somber painted Dark Fantasy, solo subject, not a party scene";
-
-    public const string FantasyMediumNegative =
-        "photograph, photorealistic, DSLR, lightly filtered photo, " +
-        "watercolor wash, wet paper blooms, paintbrushes in frame, " +
-        "cartoon outlines, comic ink, Ben-Day halftone, flat vector icon, pixel art, " +
-        "neon CGI, raytraced 3d, chrome reflections, anime, cel-shaded, " +
-        "multiple subjects, crowd, group, trio, couple, extra characters, " +
-        "horned creature unless requested, minotaur, demon, monster, beach party, " +
-        "palace crowd, epic cast, unrelated characters";
-
-
-    // Reference + style: reuse the SAME style language as txt2img (BuildPrompt). Live issue:
-    // Fantasy alone looks great; Fantasy + reference looked like a mix because this path used a
-    // different prompt pile + "same setting as the reference" that anchored the photo.
-    // Medium locks are only added for styles that lose to photo pixels without them.
-    public static string BuildReferenceStylePrompt(string prompt, string style)
-    {
-        var edit = prompt.Trim();
-        var genericRestyle = string.IsNullOrWhiteSpace(edit)
-            || Regex.IsMatch(edit,
-                @"\b(convert|make|turn|change|transform|restyle)\b.*\b(cartoon|comic|anime|drawing|illustration|style|icon)\b",
-                RegexOptions.IgnoreCase);
-
-        // Keep the user's full ask — stripping only "make " left broken "it a wooden toy boat" (live).
-        if (!genericRestyle)
-        {
-            edit = Regex.Replace(edit,
-                @"^(make|turn|change|render)\s+it\s+(into\s+)?((an?|the)\s+)?",
-                "",
-                RegexOptions.IgnoreCase).Trim();
-            if (string.IsNullOrWhiteSpace(edit))
-                edit = prompt.Trim();
-        }
-
-        var subjectForStyle = genericRestyle ? "the subject" : edit;
-        var built = BuildPrompt(subjectForStyle, style);
-
-        var needsPhotoEscapeMedium =
-            SoftPaintStyles.Contains(style)
-            || FlatSimplifyStyles.Contains(style)
-            || GraphicInkStyles.Contains(style);
-
-        // Styles that already look right from noise (Fantasy, Claymation, …): keep BuildPrompt
-        // intact and only pin the reference subject. Do not rephrase the style.
-        if (!needsPhotoEscapeMedium)
-        {
-            return
-                $"{built.Prompt}, {ReferenceSubjectLock}, " +
-                "not a lightly filtered photograph of the reference";
-        }
-
-        var suffixStart = built.Prompt.IndexOf(',');
-        var styleSuffixText = suffixStart >= 0 ? built.Prompt[(suffixStart + 1)..].Trim() : built.Prompt;
-
-        var mediumLead = SoftPaintStyles.Contains(style)
-            ? PaintMediumLock(style) + ", "
-            : FlatSimplifyStyles.Contains(style)
-                ? SimplifyMediumLock(style) + ", "
-                : InkMediumLock(style) + ", ";
-
-        var subjectBit = genericRestyle
-            ? ReferenceSubjectLock
-            : $"{edit}, {ReferenceSubjectLock}";
-
-        var bg = FlatSimplifyStyles.Contains(style)
-            ? "simple flat icon background, "
-            : "";
-
-        return
-            $"{subjectBit}, {mediumLead}{styleSuffixText}, {bg}" +
-            $"clear consistent {style} look throughout, " +
-            "style and subject equally important, " +
-            "not a photograph, not photorealistic, not a lightly filtered photo";
-    }
-
-    // Style=None + reference: short attribute edit on the same person. Avoid race/ethnicity
-    // vocabulary (live: aged white girl → East Asian adult). Face/skin words + low denoise.
-    public static string BuildReferenceEditPrompt(string prompt)
-    {
-        var edit = prompt.Trim();
-        // Drop leading "make/turn/change into" so attributes attach to the same subject.
-        edit = Regex.Replace(edit,
-            @"^(make|turn|change|render|age)\s+",
-            "",
-            RegexOptions.IgnoreCase).Trim();
-
-        // "age … 30 years" OR "30 years older"
-        var ageMatch = Regex.Match(edit,
-            @"\bage\b.{0,48}?\b(\d+)\s*years?\b|\b(\d+)\s*years?\s+older\b",
-            RegexOptions.IgnoreCase);
-        if (ageMatch.Success)
-        {
-            var yearsText = ageMatch.Groups[1].Success ? ageMatch.Groups[1].Value : ageMatch.Groups[2].Value;
-            if (int.TryParse(yearsText, out var years) && years > 0)
-            {
-                edit =
-                    $"aged {years} years, older face with wrinkles, hair may be greyer, {edit}";
-            }
-        }
-        else if (Regex.IsMatch(edit, @"\bolder\b|\bage[sd]?\b", RegexOptions.IgnoreCase))
-        {
-            edit = $"age progression, older face with wrinkles, {edit}";
-        }
-
-        return
-            $"photograph of the same person from the reference photo, {edit}, " +
-            $"{ReferenceIdentityLock}, keep the original face structure and skin tone";
-    }
 
     public static bool PromptImpliesPerson(string prompt) =>
         Regex.IsMatch(prompt,
             @"\b(person|people|human|man|woman|men|women|girl|boy|child|children|baby|" +
             @"someone|somebody|character|portrait|selfie|face|fisherman|sailor|captain|" +
             @"pilot|driver|rider|couple|family|crowd|guy|lady|gentleman|" +
-            @"wizard|witch|knight|warrior|hero|heroine|princess|king|queen)\b",
+            @"wizard|witch|knight|warrior|hero|heroine|princess|king|queen|fairy|fae|elf|nymph)\b",
             RegexOptions.IgnoreCase);
 
     // When the user asked for an object (e.g. "red boat"), Cartoon/Comic often invent a
@@ -425,10 +143,7 @@ public static class StylePromptBuilder
         }
 
         // The subject goes first: earlier tokens carry more weight in the text encoder, so
-        // leading with style words buries the actual subject. Photorealistic also steers the
-        // negative prompt away from the model's illustrative default — SDXL (and DreamShaper's
-        // fine-tuning especially) leans painterly/stylized unless told otherwise, so "photo" in
-        // the prompt alone doesn't reliably win on its own.
+        // leading with style words buries the actual subject.
         var (styleSuffix, extraNegative, guidanceMultiplier) = style switch
         {
             // One centered glyph — landscape often splits into dual icons (live Icon batch).
@@ -454,14 +169,6 @@ public static class StylePromptBuilder
                 "spot color, only red color, DSLR",
                 FlatStyleGuidanceMultiplier),
 
-            // Kept out of the UI (overlaps Cartoon/Anime; live Cel: stripes vs scenery). Fallback only.
-            "Cel-Shaded" => (
-                "cel-shaded 3d game render of the subject, Wind Waker style toon shading, " +
-                "bold outlines, flat hard-edged color regions, consistent game environment",
-                "photo, realistic, painterly, watercolor, oil painting, anime, manga, abstract stripes, " +
-                "empty void, high contrast red and black poster",
-                FlatStyleGuidanceMultiplier),
-
             // Guide / New Anime recipe — masterpiece quality tags, push off western comic & photo.
             "Anime" => (
                 "anime illustration of the subject, manga style, clean line art, vibrant cel shading, " +
@@ -479,23 +186,6 @@ public static class StylePromptBuilder
                 "oil painting, comic, vector art, flat colors, cartoon",
                 1f),
 
-            // Subject FIRST (live medium-first → palette-knife macros, no boat). Texture after.
-            // Say "palette-knife ridges" not "palette knife" alone (tool shows up in frame).
-            "Impasto" => (
-                "impasto painting of the subject, thick oil paint, thick textured paint, visible brush strokes, " +
-                "raised paint ridges on the subject, palette-knife ridged paint on the subject, " +
-                "highly textured canvas, 3D paint surface texture, dramatic raking light revealing paint thickness, " +
-                "rich pigments, high detail, clear recognizable subject as the main focus",
-                "flat paint, smooth, airbrushed, low texture, plastic, " +
-                "photograph, DSLR, photorealistic, photo, camera, thin paint, " +
-                "palette knife in frame, painting knife in frame, paintbrush, paintbrushes, brush in paint, " +
-                "paint jar, paint wells, dropper, art supplies, studio flat lay, paint tube, easel, " +
-                "macro of paint only, abstract paint only, no subject, missing subject, only paint, " +
-                "boat interior POV, split screen, diptych, two panels, side by side, " +
-                "graphic poster, vector art, cartoon, watercolor, CGI, ornate frame",
-                ImpastoGuidanceMultiplier),
-
-            // Exact recipe that Impasto was landing live (user: "that's the style I like" under Impasto).
             "Graphic Oil" => (
                 "thick textured oil painting of the subject on canvas, visible palette-knife and brush texture, " +
                 "rich wet oil paint with painterly depth, clear recognizable subject, fine-art oil painting atmosphere",
@@ -516,7 +206,7 @@ public static class StylePromptBuilder
 
             // Guide / New Oil Painting recipe — thick strokes, canvas, museum oil look.
             // Keep strong painterly brushwork (dropping it collapsed to glossy photo); only fence
-            // off the palette-knife / blocky-slab look that belongs to Graphic Oil & Impasto.
+            // off the palette-knife / blocky-slab look that belongs to Graphic Oil.
             "Oil Painting" => (
                 "oil painting of the subject, oil on canvas, visible oil brushstrokes, painterly brushwork, " +
                 "thick expressive brush strokes, visible canvas texture, rich color palette, " +
@@ -535,21 +225,26 @@ public static class StylePromptBuilder
                 "hands, fingers, clay hands, reaching hands",
                 FlatStyleGuidanceMultiplier),
 
-            // Guide / New Fantasy Art recipe — epic cinematic digital painting (Dark Fantasy stays separate).
+            // Classic D&D / RPG handbook painted art — not ArtStation previs (that's Concept Art).
             "Fantasy Art" => (
-                "epic fantasy art of the subject, highly detailed, dramatic lighting, digital painting, " +
-                "sharp focus, mythical atmosphere, cinematic fantasy illustration",
-                "photo, photorealistic, blurry, low quality, cartoon, anime, comic, pixel art, " +
-                "flat colors, amateur, 3d render, vector art",
-                1f),
-
-            // Dark medieval fantasy — muted Frazetta mood (was the old Fantasy Art look).
-            "Dark Fantasy" => (
-                "dark fantasy oil illustration of the subject, medieval epic atmosphere, muted earth and twilight colors, " +
-                "dramatic chiaroscuro, Frazetta-like mood, painted fantasy book cover, somber rich tones",
-                "photo, photorealistic, watercolor, cartoon, comic, vector art, pixel art, neon CGI, 3d render, anime, " +
-                "cel-shaded, bright primary red, high contrast red and black, pop art, cheerful flat colors",
+                "classic Dungeons and Dragons fantasy book illustration of the subject, RPG handbook painted art, " +
+                "rich saturated fantasy colors, heroic fantasy scene, detailed painted fantasy illustration, " +
+                "Larry Elmore style fantasy art, adventurer in a fantasy world, painted D&D rulebook artwork",
+                "photo, photorealistic, blurry, low quality, cartoon, anime, comic, comic book, pixel art, " +
+                "flat colors, amateur, 3d render, vector art, slice of life photo, plain snapshot, " +
+                "artstation keyframe, film previsualization, production design sheet, video game concept art, " +
+                "cinematic previs, glossy digital concept painting, matte painting study",
                 FlatStyleGuidanceMultiplier),
+
+            // Dark medieval fantasy — muted Frazetta mood (Cyberpunk-style scene lock: environment wins over prompt).
+            "Dark Fantasy" => (
+                "dark fantasy oil illustration, medieval twilight wilderness, muted earth and charcoal tones, " +
+                "dramatic chiaroscuro, Frazetta-like painted fantasy book cover, somber rich oil paint throughout",
+                "photo, photorealistic, DSLR, watercolor, cartoon, comic, comic book, graphic novel, anime, manga, " +
+                "cel-shaded, vector art, pixel art, neon CGI, cyberpunk, 3d render, bright primary colors, " +
+                "high saturation, pop art, cheerful flat colors, playful cartoon, glossy digital illustration, " +
+                "artstation polish, camping snapshot, modern casual photo, slice of life",
+                1.8f),
 
             // Guide / New Pixel Art recipe — 16-bit RPG, clean hard pixels (keep console/hardware negatives).
             // Live: object prompts pixelate fine, but people kept the smooth anime-portrait prior
@@ -590,6 +285,7 @@ public static class StylePromptBuilder
 
             // SDXL Art cyberpunk tip language (e.g. #7/#12) — neon night city, not clean sci-fi.
             // https://stable-diffusion-art.com/sdxl-prompts/
+            // Scene + palette lock — subject can be anything; environment and medium still read cyberpunk.
             "Cyberpunk" => (
                 "cyberpunk art of the subject, neon-lit night city, rain-slick streets, holographic signs, " +
                 "high-tech dystopian atmosphere, magenta and cyan neon glow, dramatic rim lighting, " +
@@ -599,17 +295,6 @@ public static class StylePromptBuilder
                 "natural landscape, soft blue-white studio lighting, oil painting, " +
                 "flat vector icon, cute cartoon, claymation",
                 FlatStyleGuidanceMultiplier),
-
-            // Color photo — live Impasto lottery hit (sunset sailboat). Distinct from Black & White / Vintage.
-            "Photorealistic" => (
-                "photograph of the subject, photorealistic DSLR photo, real-world photography, " +
-                "natural lighting, sharp focus, realistic materials, believable depth of field, " +
-                "high resolution color photograph, candid real photo",
-                "painting, oil painting, impasto, watercolor, illustration, drawing, digital art, " +
-                "cartoon, anime, comic, vector art, flat colors, 3d render, CGI, Pixar, claymation, " +
-                "pixel art, painterly, brush strokes, palette knife, canvas texture, artwork, " +
-                "graphic poster, collage, split screen, diptych, abstract",
-                PhotorealisticGuidanceMultiplier),
 
             // Sharp modern monochrome — distinct from Vintage (no sepia/grain/yellowing).
             // Live: cropped hull close-ups — push full subject in scene.
@@ -637,20 +322,17 @@ public static class StylePromptBuilder
                 1f),
 
             // --- InsiderLLM guide recipes (New*) — A/B vs existing styles; DreamShaper XL Lightning, no LoRAs ---
-            "New Photorealistic" => (
-                "photograph of the subject, shot on Canon EOS R5 85mm lens, shallow depth of field, " +
-                "natural lighting, golden hour or overcast diffused light, film grain, photorealistic, " +
-                "8K UHD, RAW photo, real-world materials, sharp focus",
-                "worst quality, low quality, blurry, cartoon, anime, illustration, painting, " +
-                "oversaturated, plastic skin, CGI, 3d render, digital art, painterly",
-                PhotorealisticGuidanceMultiplier),
-
             "Concept Art" => (
-                "concept art of the subject, digital painting, artstation, epic composition, cinematic, " +
-                "dramatic lighting, highly detailed, sharp focus, polished illustration",
-                "photo, realistic, blurry, low quality, simple, flat colors, amateur, sketch, " +
-                "cartoon, comic book, pixel art",
-                1.8f),
+                "professional video game concept art keyframe, cinematic digital painting, artstation trending, " +
+                "epic production-design illustration, dramatic environmental lighting, atmospheric depth, " +
+                "painterly brushwork, film previsualization mood, full color key art throughout",
+                "photo, photorealistic, DSLR, snapshot, blurry, low quality, amateur, rough sketch, " +
+                "cartoon, comic book, graphic novel, manga, anime, cel-shaded, bold ink outlines, " +
+                "halftone, Ben-Day dots, screentone, vector logo, flat vector icon, pixel art, " +
+                "watercolor, oil on canvas, impasto, cheerful flat colors, cute cartoon, slice of life, " +
+                "playful exaggerated proportions, graphic novel panel, pop art, camping photo, " +
+                "dungeons and dragons handbook, D&D rulebook illustration, Larry Elmore, RPG book art",
+                2.0f),
 
             // SDXL Art tip #11 "Fish" look — push hard toward colorful vector (not painterly mixed-media).
             // https://stable-diffusion-art.com/sdxl-prompts/
@@ -708,9 +390,8 @@ public static class StylePromptBuilder
                 : $"{extraNegative}, {ObjectOnlyNegative}";
         }
 
-        // Watercraft in 3D / photo / futuristic / cyberpunk — keep afloat (live Futuristic: boats with wheels).
-        if ((style == "3D Render" || style == "Photorealistic" || style == "New Photorealistic"
-                || style == "Futuristic" || style == "Cyberpunk")
+        // Watercraft in 3D / futuristic / cyberpunk — keep afloat (live Futuristic: boats with wheels).
+        if ((style == "3D Render" || style == "Futuristic" || style == "Cyberpunk")
             && PromptImpliesWatercraft(prompt))
         {
             subjectLead = style switch
@@ -741,30 +422,6 @@ public static class StylePromptBuilder
                 : $"{extraNegative}, {cropNeg}";
         }
 
-        // Impasto + boat: medium/tool words steal the subject (live: palette knife macros).
-        if (style == "Impasto" && PromptImpliesWatercraft(prompt))
-        {
-            subjectLead = $"{subjectLead}, a boat on the water, the boat is the main subject";
-            var boatNeg =
-                "palette knife in frame, painting knife, paintbrush, art supplies, " +
-                "macro of paint only, no boat, missing boat";
-            extraNegative = string.IsNullOrWhiteSpace(extraNegative)
-                ? boatNeg
-                : $"{extraNegative}, {boatNeg}";
-        }
-
-        // Equal weight: user subject and style medium both early.
-        // Impasto: SUBJECT first — medium-first ate the boat (live palette-knife macros).
-        if (style == "Impasto")
-        {
-            return (
-                $"{subjectLead}, {styleSuffix}, raised paint ridges on the subject, one composition, " +
-                $"clear consistent {style} look",
-                extraNegative,
-                guidanceMultiplier);
-        }
-
-        // Same wrap Impasto used when it was accidentally landing this look (live).
         if (style == "Graphic Oil")
         {
             return (
@@ -813,34 +470,51 @@ public static class StylePromptBuilder
                 guidanceMultiplier);
         }
 
+        // Strong scene/medium locks (same idea as Cyberpunk) — style wins over cheerful or mismatched prompts.
+        if (style == "Dark Fantasy")
+        {
+            return (
+                $"{subjectLead}, {styleSuffix}, " +
+                "somber medieval fantasy environment throughout, painted dark fantasy on subject and background, " +
+                "muted twilight mood, clear consistent Dark Fantasy look, not cartoon, not comic",
+                extraNegative,
+                guidanceMultiplier);
+        }
+
+        if (style == "Fantasy Art")
+        {
+            return (
+                $"{subjectLead}, {styleSuffix}, " +
+                "Dungeons and Dragons rulebook illustration throughout, painted heroic fantasy on subject and scene, " +
+                "classic RPG handbook art mood, clear consistent Fantasy Art look, not concept art keyframe, not artstation previs",
+                extraNegative,
+                guidanceMultiplier);
+        }
+
+        if (style == "Concept Art")
+        {
+            return (
+                $"{subjectLead}, {styleSuffix}, " +
+                "cinematic concept keyframe throughout, polished digital painting on subject and full environment, " +
+                "production-design artstation mood, film previs lighting, no comic ink halftone or cartoon outlines, " +
+                "clear consistent Concept Art look, not photograph, not graphic novel, not D&D rulebook illustration",
+                extraNegative,
+                guidanceMultiplier);
+        }
+
+        if (style == "Comic Book")
+        {
+            return (
+                $"{subjectLead}, {styleSuffix}, bold ink outlines and halftone dots throughout, " +
+                "graphic novel comic art on subject and background, clear consistent Comic Book look, " +
+                "not glossy concept painting",
+                extraNegative,
+                guidanceMultiplier);
+        }
+
         return (
             $"{subjectLead}, {styleSuffix}, clear consistent {style} look, subject and style equally important",
             extraNegative,
             guidanceMultiplier);
-    }
-
-    // Inference knobs for reference+style — keep in sync with MainWindow GenerateAsync.
-    public static (float Strength, float CfgFloor, double StepMul, string ExtraNeg)
-        GetReferenceStyleInference(string style)
-    {
-        if (SoftPaintStyles.Contains(style))
-        {
-            if (style is "Oil Painting" or "Soft Oil")
-                return (0.88f, 5.0f, 1.75, PaintMediumNegative(style));
-            return (0.86f, 5.5f, 1.75, PaintMediumNegative(style));
-        }
-        if (FlatSimplifyStyles.Contains(style))
-        {
-            if (style == "Pixel Art")
-                return (0.97f, 8.0f, 2.0, SimplifyMediumNegative(style));
-            return (0.95f, 7.0f, 2.0, SimplifyMediumNegative(style));
-        }
-        if (GraphicInkStyles.Contains(style))
-            return (0.92f, 6.5f, 2.0, $"{InkMediumNegative(style)}, studio background, plain backdrop, different background");
-        if (style is "Fantasy Art" or "Dark Fantasy")
-            // High denoise so photo pixels don't dilute the txt2img Fantasy look; anti-cast
-            // negatives only (prompt already matches BuildPrompt).
-            return (0.95f, 6.5f, 2.0, FantasyMediumNegative);
-        return (0.86f, 5.0f, 1.5, "studio background, plain backdrop, solid color background, different background, empty background");
     }
 }

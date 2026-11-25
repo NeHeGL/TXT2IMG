@@ -7,7 +7,7 @@
     xmlns:local="using:TXT2IMG"
     mc:Ignorable="d"
     Title="TXT2IMG">
-    <Grid x:Name="RootGrid" Padding="24">
+    <Grid x:Name="RootGrid" Padding="24" SizeChanged="RootGrid_SizeChanged">
         <Grid.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                 <GradientStop Color="#FF15141A" Offset="0" />
@@ -21,57 +21,116 @@
 
         <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="14" Grid.Row="0" Margin="0,0,0,0">
             <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid Grid.Row="0">
+                    <Border Grid.Row="0" Grid.Column="0" Height="60" MinHeight="60" MaxHeight="60" VerticalAlignment="Center"
+                            Background="#FF2A2939" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                            CornerRadius="10" Padding="2"
+                            PointerWheelChanged="PromptBox_PointerWheelChanged">
+                        <TextBox x:Name="PromptTextBox"
+                                 PlaceholderText="Describe what you want — Enter generates, Shift+Enter new line"
+                                 Background="Transparent" Foreground="White" PlaceholderForeground="#FF9A99AC"
+                                 BorderThickness="0" CornerRadius="0"
+                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                 FontSize="15" Padding="12,8,16,8"
+                                 TextWrapping="Wrap"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 GotFocus="PromptTextBox_GotFocus"
+                                 SelectionChanged="PromptTextBox_SelectionChanged"
+                                 TextChanged="PromptTextBox_TextChanged"
+                                 KeyDown="PromptTextBox_KeyDown">
+                            <!-- Built-in text context menu pulls TabView theme keys (crashes unpackaged). -->
+                            <TextBox.ContextFlyout>
+                                <MenuFlyout Opening="PromptTextContextFlyout_Opening">
+                                    <MenuFlyoutItem x:Name="PromptCutMenuItem" Text="Cut"
+                                                    Click="PromptContextCut_Click" />
+                                    <MenuFlyoutItem x:Name="PromptCopyMenuItem" Text="Copy"
+                                                    Click="PromptContextCopy_Click" />
+                                    <MenuFlyoutItem x:Name="PromptPasteMenuItem" Text="Paste"
+                                                    Click="PromptContextPaste_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Text="Select all"
+                                                    Click="PromptContextSelectAll_Click" />
+                                </MenuFlyout>
+                            </TextBox.ContextFlyout>
+                        </TextBox>
+                    </Border>
+                    <Button x:Name="GenerateButton" Grid.Row="0" Grid.Column="1" Content="Generate" Width="140" Height="40"
+                            Margin="10,0,0,0" VerticalAlignment="Center" Click="GenerateButton_Click"
+                            Background="{StaticResource AccentGradientBrush}" Foreground="White"
+                            FontWeight="SemiBold" FontSize="13" CornerRadius="10" />
+                <Grid Grid.Row="1" Grid.Column="0" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="PromptTextBox" Grid.Column="0" Height="44" PlaceholderText="Describe what you want, then press Enter" Background="#FF2A2939" Foreground="White" PlaceholderForeground="#FF9A99AC" BorderBrush="{StaticResource CardBorderBrush}" VerticalAlignment="Center" FontSize="15" KeyDown="PromptTextBox_KeyDown" />
-                    <Button x:Name="GenerateButton" Grid.Column="1" Content="Generate" Width="140" Height="44" Margin="10,0,0,0" Click="GenerateButton_Click" Background="{StaticResource AccentGradientBrush}" Foreground="White" FontWeight="SemiBold" FontSize="13" CornerRadius="12" />
-                </Grid>
-                <!-- Columns mirror the row above: the controls share the prompt box's column so the
-                     aspect box ends on its right edge, and Max Detail sits in a column the width of
-                     the Generate button, lining the two rows up into two visual columns. -->
-                <Grid Grid.Row="1" Margin="0,10,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Grid Grid.Column="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Prompts and images stay on this PC — generation is local. (First run will download the model.)" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" VerticalAlignment="Center" />
-                        <!-- GitHub-proven ComboBox: wheel via ScrollableComboBox_DropDownOpened
-                             (microsoft-ui-xaml#8764); AlignPopupTopToElement keeps the popup on the box. -->
-                        <ComboBox x:Name="StyleComboBox" Grid.Column="1" Width="170" Height="40" Margin="10,0,0,0" MaxDropDownHeight="420" ToolTipService.ToolTip="Style" SelectionChanged="StyleComboBox_SelectionChanged" DropDownOpened="ScrollableComboBox_DropDownOpened" BorderBrush="{StaticResource StyleAccentBrush}" BorderThickness="2" ItemContainerStyle="{StaticResource PointerOnlyComboBoxItemStyle}" />
-                        <ComboBox x:Name="AspectComboBox" Grid.Column="2" Width="170" Height="40" Margin="10,0,0,0" SelectedIndex="1" ToolTipService.ToolTip="Aspect ratio" SelectionChanged="AspectComboBox_SelectionChanged">
-                            <ComboBoxItem Content="Square" />
-                            <ComboBoxItem Content="Landscape (16:9)" />
-                            <ComboBoxItem Content="Portrait (9:16)" />
-                            <ComboBoxItem Content="Landscape (4:3)" />
-                            <ComboBoxItem Content="Portrait (3:4)" />
-                        </ComboBox>
-                    </Grid>
-                    <Grid Grid.Column="1" Width="140" Margin="10,0,0,0">
-                        <CheckBox x:Name="MaxDetailCheckBox" Content="Max Detail"
-                                  HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White"
-                                  ToolTipService.ToolTip="More inference steps — slower, often cleaner anatomy and detail" />
-                    </Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="40" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Column="1" Grid.Row="0" Margin="10,0,0,6" Text="Graphics style"
+                               Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Grid.Row="0" Margin="10,0,0,6" Text="Aspect ratio"
+                               Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Grid.Row="0" Margin="10,0,0,6" Text="Resolution"
+                               Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                               HorizontalAlignment="Center" />
+                    <StackPanel Grid.Column="0" Grid.Row="1" VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="Prompts and images stay on this PC — generation is local."
+                                   Foreground="{StaticResource SubtleTextBrush}" FontSize="12" />
+                        <TextBlock x:Name="NewVariationHintText" Visibility="Collapsed"
+                                   Text='"New Variation" — Creates a new take on the selected image.'
+                                   Foreground="{StaticResource SubtleTextBrush}" FontSize="12"
+                                   TextWrapping="WrapWholeWords" />
+                        <TextBlock x:Name="FirstRunDownloadText" Visibility="Collapsed"
+                                   Text="First run downloads the model (this can take some time)."
+                                   Foreground="{StaticResource SubtleTextBrush}" FontSize="12"
+                                   TextWrapping="WrapWholeWords" />
+                    </StackPanel>
+                    <ComboBox x:Name="StyleComboBox" Grid.Column="1" Grid.Row="1" Margin="10,0,0,0"
+                              Width="170" Height="40" MaxDropDownHeight="420"
+                              VerticalAlignment="Center"
+                              ToolTipService.ToolTip="Art style preset applied to your prompt"
+                              SelectionChanged="StyleComboBox_SelectionChanged" DropDownOpened="ScrollableComboBox_DropDownOpened"
+                              BorderBrush="{StaticResource StyleAccentBrush}" BorderThickness="2"
+                              ItemContainerStyle="{StaticResource PointerOnlyComboBoxItemStyle}" />
+                    <ComboBox x:Name="AspectComboBox" Grid.Column="2" Grid.Row="1" Margin="10,0,0,0"
+                              Width="170" Height="40" SelectedIndex="1" VerticalAlignment="Center"
+                              ToolTipService.ToolTip="Shape of the generated image"
+                              SelectionChanged="AspectComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Square" />
+                        <ComboBoxItem Content="Landscape (16:9)" />
+                        <ComboBoxItem Content="Portrait (9:16)" />
+                        <ComboBoxItem Content="Landscape (4:3)" />
+                        <ComboBoxItem Content="Portrait (3:4)" />
+                    </ComboBox>
+                    <ComboBox x:Name="ResolutionComboBox" Grid.Column="3" Grid.Row="1" Margin="10,0,0,0"
+                              Width="130" Height="40" VerticalAlignment="Center"
+                              ToolTipService.ToolTip="768 or 896 px long edge (896 is the GPU maximum)." />
                 </Grid>
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="10,0,0,0" Orientation="Vertical" Spacing="2"
+                            VerticalAlignment="Center" Width="140">
+                    <!-- Spacer keeps 4K on the lower row (aligned under the control stack). -->
+                    <Border Height="24" Opacity="0" IsHitTestVisible="False" />
+                    <CheckBox x:Name="Upscale4KCheckBox" Content="4K upscale" Foreground="White"
+                              HorizontalAlignment="Center"
+                              ToolTipService.ToolTip="After each image, resize to 3840 px long edge (CPU). Export size only — not GPU resolution." />
+                </StackPanel>
             </Grid>
         </Border>
 
         <Grid Grid.Row="1" Margin="0,12,0,0">
-            <!-- Preview takes all leftover height; Results is a compact Auto strip sized from a
-                 fixed thumbnail budget (not a star share), so the window doesn't need to be
-                 very tall for the preview to look decent. -->
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
@@ -94,10 +153,15 @@
                             <Grid>
                                 <TextBlock x:Name="PreviewPlaceholderText" Text="Your image will appear here"
                                            Foreground="#FF55536A" FontSize="15"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           TextAlignment="Center" TextWrapping="WrapWholeWords"
+                                           Margin="10" IsHitTestVisible="False" />
+                                <Image x:Name="PreviewImage" Stretch="Uniform"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <Border x:Name="PreviewHoverBorder" BorderBrush="Transparent" BorderThickness="3" CornerRadius="14"
+                                        IsHitTestVisible="False" />
                                 <Button x:Name="PreviewImageButton" Background="Transparent" BorderThickness="0" Padding="0"
                                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                                         Click="PreviewImage_Click" ToolTipService.ToolTip="Click to copy to clipboard"
                                         PointerEntered="PreviewImageButton_PointerEntered" PointerExited="PreviewImageButton_PointerExited">
                                     <Button.Resources>
@@ -106,9 +170,6 @@
                                         <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
                                         <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
                                     </Button.Resources>
-                                    <Border x:Name="PreviewHoverBorder" BorderBrush="Transparent" BorderThickness="3" CornerRadius="14">
-                                        <Image x:Name="PreviewImage" Stretch="Uniform" />
-                                    </Border>
                                 </Button>
                                 <Border x:Name="CopiedToast" Background="{StaticResource AccentGradientBrush}" CornerRadius="18" Padding="18,8"
                                         HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,16,0,0" Opacity="0" IsHitTestVisible="False">
@@ -123,6 +184,8 @@
                         <Button x:Name="CopyButton" Content="Copy to Clipboard" Width="160" Height="40" Click="CopyButton_Click"
                                 Background="{StaticResource AccentGradientBrush}" Foreground="White" FontWeight="SemiBold" CornerRadius="10" />
                         <Button x:Name="SaveButton" Content="Save as PNG" Width="130" Height="40" Click="SaveButton_Click" CornerRadius="10" />
+                        <Button x:Name="VaryButton" Content="New Variation" Width="130" Height="40" Click="VaryButton_Click" CornerRadius="10"
+                                ToolTipService.ToolTip="Img2img variation from the selected result (stored prompt and layout, new details)" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -142,7 +205,9 @@
                     <TextBlock Grid.Row="0" Grid.Column="2" Text="Jeff Molofee (NeHe) 2026" FontSize="11" Foreground="{StaticResource SubtleTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
 
                     <Border x:Name="StyleDescriptionBorder" Background="#FF121116" BorderBrush="{StaticResource StyleAccentBrush}" BorderThickness="2" CornerRadius="12" Margin="0,8,0,0" Grid.Row="1" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top">
-                        <TextBlock x:Name="StyleDescriptionText" Foreground="#FF9A99AC" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="8" />
+                        <TextBlock x:Name="StyleDescriptionText" Foreground="#FF9A99AC" FontSize="11"
+                                   HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                   TextAlignment="Center" TextWrapping="Wrap" Margin="6" />
                     </Border>
 
                     <ItemsControl x:Name="ResultsPanel" Grid.Row="1" Grid.Column="0" Margin="0,8,0,0">
@@ -153,11 +218,16 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="local:ResultItem">
-                                <Grid Width="96" Height="96">
-                                    <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="12" Background="{StaticResource ResultSlotBackgroundBrush}">
+                                <Grid Width="{x:Bind SlotWidth, Mode=OneWay}" Height="{x:Bind SlotHeight, Mode=OneWay}">
+                                    <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="12" Background="{StaticResource ResultSlotBackgroundBrush}"
+                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                                         <Grid>
-                                            <TextBlock Text="+" FontSize="28" Foreground="#FF6A6A6A" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <TextBlock Text="{x:Bind SlotMark, Mode=OneWay}" FontSize="28" Foreground="{x:Bind SlotMarkBrush, Mode=OneWay}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="{x:Bind SlotImageStretch, Mode=OneWay}"
+                                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                                             <Button Tag="{x:Bind}" Click="ResultSlot_Click" Background="Transparent" BorderThickness="0" Padding="0"
+                                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                                     HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                                                     ToolTipService.ToolTip="{x:Bind Hint, Mode=OneWay}">
                                                 <Button.Resources>
@@ -166,7 +236,6 @@
                                                     <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
                                                     <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
                                                 </Button.Resources>
-                                                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="UniformToFill" />
                                             </Button>
                                         </Grid>
                                     </Border>

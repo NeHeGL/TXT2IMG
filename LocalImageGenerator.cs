@@ -35,14 +35,16 @@ public class LocalImageGenerator : IImageGenerator
     // legs) blending into one undifferentiated mass, and a leg terminating in a rounded stump
     // instead of a foot. Hands already had their own deformity terms below; feet had none at all.
     private const string BaseNegativePrompt =
-        "blurry, distorted, watermark, text, low quality, extra limbs, duplicate, " +
+        "blurry, soft focus, out of focus, defocused, gaussian blur, depth of field blur, " +
+        "distorted, watermark, text, low quality, extra limbs, duplicate, " +
         "deformed hands, extra fingers, fused fingers, mutated hands, bad anatomy, disfigured face, " +
         "fused limbs, merged limbs, conjoined limbs, extra legs, extra arms, " +
         "deformed feet, mutated feet, extra toes, fused toes, missing feet, disfigured feet, " +
         "amputee, cropped legs, missing limbs, stump";
 
-    // Only one SDXL pipeline is kept loaded at a time (each is several GB of VRAM); switching
-    // the selected model unloads whatever was active before loading the new one.
+    // Only one SDXL pipeline is kept loaded at a time (each is several GB of VRAM on a 16 GB card);
+    // switching the selected model unloads whatever was active before loading the new one.
+    // Seed batches still run one image at a time — see HardwareBudget.MaxConcurrentGenerations.
     private static StableDiffusionXLPipeline? _pipeline;
     private static string? _loadedModelId;
 
